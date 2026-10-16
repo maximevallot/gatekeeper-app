@@ -6,18 +6,34 @@ import { ask, when, el, checkWorker, warnings } from "./common.js";
 const $ = (id) => document.getElementById(id);
 const url = location.hash.slice(1); // the page that was stopped, exactly as it was asked for
 
+let waits = 0;
 async function show() {
   let host = "";
   try { host = new URL(url).hostname.replace(/^www\./, ""); } catch {}
   const decided = await ask("decide", { url });
   const { decision: d, goal } = decided;
+  if (decided.judging && waits++ < 6) {
+    // A video stopped before it loaded, being checked against the video rules: ask again in a moment.
+    document.title = "Checking this video";
+    $("headline").textContent = "Checking this video against your video rules…";
+    $("closed").classList.remove("hidden");
+    setTimeout(show, 1500);
+    return;
+  }
   if (d.verdict === "allow" && /^https?:/.test(url)) {
-    location.replace(url); // reopened since (a new morning): go back to the page
+    location.replace(url); // reopened since (a new morning), or a video rule lets it through: go back to the page
     return;
   }
   document.title = `${d.label || host} closed`;
   $("site").textContent = d.label ? `${host} · ${d.label}` : host;
-  if (d.verdict === "block") {
+  if (d.video) {
+    // A video rule, not a kind: the gate does not argue with it; the rules page changes it.
+    const rule = `Your rule on YouTube videos about ${d.video.name}${d.video.except ? `, except ${d.video.except}` : ""}`;
+    $("headline").textContent = d.verdict === "block" ? "This video is closed" : "Closed for today";
+    $("used").textContent = d.verdict === "block"
+      ? `${rule}, closes it. To change that rule, use your rules page; loosening takes effect the next morning.`
+      : `${rule}: you used its ${d.budgetMinutes} minutes. It opens again ${when(d.reopensAt)}.`;
+  } else if (d.verdict === "block") {
     $("headline").textContent = "Closed all day";
     $("used").textContent = `You set ${d.label.toLowerCase()} to 0 minutes. It stays closed until you change that rule, which takes effect the next morning.`;
   } else {
@@ -31,7 +47,8 @@ async function show() {
   $("closed").classList.remove("hidden");
   warnings(decided, $("closed"));
   talk = { on: decided.talk, host, kind: d.label };
-  if (decided.cooldownUntil) shut(`We already talked about this. The answer stands until ${clock(decided.cooldownUntil)}.`);
+  if (d.video) shut("");
+  else if (decided.cooldownUntil) shut(`We already talked about this. The answer stands until ${clock(decided.cooldownUntil)}.`);
   else $("message").focus();
 }
 
@@ -106,6 +123,8 @@ async function send(text) {
     shut(`We already talked about this. The answer stands until ${clock(r.until)}.`);
   } else if (r.decision === "refused" && r.reason === "passes_used") {
     shut(`The gate has opened ${talk.kind.toLowerCase()} three times today, so it stays shut until tomorrow.`);
+  } else if (r.decision === "refused" && r.reason === "video_rule") {
+    shut("A video rule is changed on your rules page, not here.");
   } else if (r.decision === "refused" && r.reason === "open") {
     location.replace(url);
   } else if (r.error === "daily_limit") {

@@ -16,8 +16,16 @@
 // Milestone 2 adds the gate that talks back and the sorting of unknown sites. The engine builds what is
 // sent and applies what comes back (a pass, a cooldown, a site's kind); the hands make the network call.
 // Nothing is sent unless the user said yes: `talk` for the gate, `sorting` for unknown sites.
+//
+// Milestone 3 adds video rules (rules about kinds of YouTube videos, each with its own budget; see
+// videos.js) and the rules chat. Each yes to sending something is kept with the version of the text the
+// user agreed to (CONSENT); when what is sent changes, the version goes up and the user is asked again.
 
 import { KINDS, hostOf, matches } from "./catalog.js";
+import {
+  MAX_JUDGED, videoKeyOf, videoSiteOf, videoRulesKey, videoName, cleanVideos, tightenVideos,
+  describeVideoChanges, matchWords, applyDiff, rulesForChat,
+} from "./videos.js";
 
 export const DEFAULT_MINUTES = 15;
 export const DEFAULT_DAY_START = 4; // the day, and every budget, turns over at 4:00
@@ -30,13 +38,19 @@ export const COOLDOWN_MS = 10 * 60e3; // after a no, the gate does not listen ag
 export const AFTER_PASS_MS = 15 * 60e3; // after a pass ends, the gate does not listen again for this long
 export const FOLLOW_UP_MS = 10 * 60e3; // one follow-up to a question, within this long
 export const MAX_MESSAGE = 500;
+export const JUDGE_RETRY_MS = 60e3; // a judgment in flight is asked again after this long
+export const MAX_ALLOWED_VIDEOS = 50; // judged videos given a rule of their own in the browser, per list (five filters each)
+
+// The version of each consent text. Raise one when what that switch sends changes: the user is asked again.
+// talk: the gate. sorting: unknown sites. chat: the rules chat. judge: video rules judged by Claude.
+export const CONSENT = { talk: 1, sorting: 1, chat: 1, judge: 1 };
 
 export function initialState() {
   return {
     version: 2,
     setupDone: false,
     goal: "",
-    rules: { kinds: {}, sites: {}, dayStart: DEFAULT_DAY_START },
+    rules: { kinds: {}, sites: {}, videos: [], dayStart: DEFAULT_DAY_START },
     pending: null, // { rules, from }: a looser version waiting for the morning
     clock: { floor: 0 }, // the latest time seen; time never goes back
     usage: { day: null, endsAt: 0, seconds: {}, passes: {} }, // passes: kind -> passes granted today
@@ -48,6 +62,9 @@ export function initialState() {
     passes: {}, // domain -> { kind, secondsLeft }: a pass the gate granted for one site
     cooldowns: {}, // kind -> until (ms): the gate does not listen
     followUps: {}, // kind -> until (ms): the gate asked a question; one answer is allowed
+    consent: {}, // switch -> the CONSENT version the user said yes to
+    judged: {}, // "yt:<id>" -> { rule, key, by, at }: which video rule a video falls under (rule null: none)
+    judging: {}, // "yt:<id>" -> when it was asked: a judgment in flight
   };
 }
 
@@ -62,6 +79,12 @@ export function upgrade(state) {
     s.passes = {}; // version 1 passes were per kind and clock-based; they last minutes, so they are dropped
     s.version = 2;
   }
+  if (!Array.isArray(s.rules.videos)) s.rules = { ...s.rules, videos: [] };
+  // The switches before consent had versions: a yes then was a yes to version 1 of the text.
+  const consent = { ...(s.consent || {}) };
+  if (s.talk && !consent.talk) consent.talk = 1;
+  if (s.sorting && !consent.sorting) consent.sorting = 1;
+  s.consent = consent;
   return s;
 }
 
@@ -159,13 +182,15 @@ function passFor(s, url, kind) {
  */
 export function decide(state, { url, title = "", now }) {
   const s = rollover(state, now);
+  const video = videoDecision(s, url, title);
+  if (video) return video;
   const kind = kindOf(s, url);
   const rule = kind && s.rules.kinds[kind];
   if (!rule) return { verdict: "allow", kind, watched: false };
   const budget = rule.minutes * 60;
   const used = usedSeconds(s, kind);
   const base = {
-    kind, label: label(kind), watched: true, title,
+    kind, bucket: kind, label: label(kind), watched: true, title,
     usedMinutes: Math.floor(used / 60), budgetMinutes: rule.minutes,
     leftMinutes: Math.max(0, Math.ceil((budget - used) / 60)),
     reopensAt: s.usage.endsAt,
@@ -193,10 +218,10 @@ export function tick(state, { url, title = "", focused, active, seconds, now, au
   }
   const counted = new Set();
   const front = decide(s, { url, title, now: t });
-  if (focused && active && front.watched && front.verdict === "allow") counted.add(front.kind);
+  if (focused && active && front.watched && front.verdict === "allow") counted.add(front.bucket);
   for (const u of audible) {
     const d = decide(s, { url: u, now: t });
-    if (d.watched && d.verdict === "allow") counted.add(d.kind);
+    if (d.watched && d.verdict === "allow") counted.add(d.bucket);
   }
   if (add && counted.size) {
     const sec = { ...s.usage.seconds };
@@ -216,7 +241,89 @@ export function tick(state, { url, title = "", focused, active, seconds, now, au
     }
     s = { ...s, unknown: { ...(s.unknown || {}), [domain]: next } };
   }
-  return { state: s, decision: decide(s, { url, title, now: t }), sort };
+  // A video on a site with video rules, not judged under their present wording: ask once.
+  let judge = null;
+  const key = videoKeyOf(url);
+  if (key && focused && needsJudgment(s, url)) {
+    const asked = (s.judging || {})[key];
+    if (!(asked && t - asked < JUDGE_RETRY_MS)) {
+      const judging = {};
+      for (const [k, at] of Object.entries(s.judging || {})) if (t - at < 10 * JUDGE_RETRY_MS) judging[k] = at;
+      s = { ...s, judging: { ...judging, [key]: t } };
+      judge = key;
+    }
+  }
+  return { state: s, decision: decide(s, { url, title, now: t }), sort, judge };
+}
+
+// ---------- video rules ----------
+
+const videoRules = (s, site) => (s.rules.videos || []).filter((v) => v.site === site);
+
+/** The rule a judged video falls under, or null: not a video, no rules, not judged yet, or no rule fits. */
+function videoRuleFor(s, url) {
+  const key = videoKeyOf(url), site = videoSiteOf(url);
+  if (!key || !site) return null;
+  const rules = videoRules(s, site);
+  const j = rules.length && (s.judged || {})[key];
+  if (!j || j.key !== videoRulesKey(rules, site) || !j.rule) return null;
+  return rules.find((v) => v.id === j.rule) || null;
+}
+
+function videoDecision(s, url, title) {
+  const v = videoRuleFor(s, url);
+  if (!v) return null;
+  const kind = kindOf(s, url);
+  const base = { kind, video: { id: v.id, name: videoName(v), except: v.except }, label: `Videos about ${videoName(v)}`, title };
+  if (v.minutes === null) return { ...base, verdict: "allow", watched: false };
+  const bucket = "v:" + v.id;
+  const used = usedSeconds(s, bucket);
+  const d = {
+    ...base, bucket, watched: true,
+    usedMinutes: Math.floor(used / 60), budgetMinutes: v.minutes,
+    leftMinutes: Math.max(0, Math.ceil((v.minutes * 60 - used) / 60)), reopensAt: s.usage.endsAt,
+  };
+  if (v.minutes === 0) return { ...d, verdict: "block" };
+  return { ...d, verdict: used >= v.minutes * 60 ? "gate" : "allow" };
+}
+
+/** Whether this page is a video that a video rule may apply to and that has no judgment yet. */
+export function needsJudgment(state, url) {
+  const key = videoKeyOf(url), site = videoSiteOf(url);
+  if (!key || !site) return false;
+  const rules = videoRules(state, site);
+  if (!rules.length) return false;
+  const j = (state.judged || {})[key];
+  return !j || j.key !== videoRulesKey(rules, site);
+}
+
+/**
+ * How to judge one video, given its title and channel (from YouTube). With the user's yes to judging by
+ * Claude, the payload for the relay's /judge: the site, the title, the channel and each rule's wording.
+ * Without it, the answer from the rules' word lists on this device, and nothing is sent.
+ */
+export function judgeRequest(state, key, { title = "", channel = "" }) {
+  const site = "youtube.com";
+  const rules = videoRules(state, site);
+  const t = String(title).replace(/\s+/g, " ").trim().slice(0, 200);
+  const c = String(channel).replace(/\s+/g, " ").trim().slice(0, 100);
+  if (!rules.length) return { local: null };
+  if (!consented(state, "judge") || !t) return { local: matchWords(rules, { title: t, channel: c }) };
+  return {
+    payload: { installId: state.installId, site, title: t, channel: c, rules: rules.map(({ id, about, except }) => ({ id, about, except })) },
+    fallback: matchWords(rules, { title: t, channel: c }),
+  };
+}
+
+/** Keep which rule a video falls under (null: none), under the rules' present wording. */
+export function recordJudgment(state, key, rule, by, now) {
+  const t = Math.max(Number(now) || 0, (state.clock && state.clock.floor) || 0);
+  const rules = videoRules(state, "youtube.com");
+  const ok = rule === null || rules.some((v) => v.id === rule);
+  const { [key]: _, ...judging } = state.judging || {};
+  const judged = { ...(state.judged || {}), [key]: { rule: ok ? rule : null, key: videoRulesKey(rules, "youtube.com"), by, at: t } };
+  const keep = Object.entries(judged).sort((a, b) => b[1].at - a[1].at).slice(0, MAX_JUDGED);
+  return { ...state, judged: Object.fromEntries(keep), judging };
 }
 
 /** The relay's answer for a domain. From now on it counts against that kind, if the kind is watched. */
@@ -273,7 +380,24 @@ export function enforcement(state, now, { withheld = [] } = {}) {
   const hidden = new Set(withheld);
   const passed = (d) => { const p = (s.passes || {})[d]; return p && p.secondsLeft > 0; };
   const blind = watchedDomains(s).filter((d) => hidden.has(d) && !passed(d));
-  return { redirect: closed, block: [...new Set([...closed, ...blind])], blind };
+  // Judged videos: one a rule lets through stays reachable when its site is closed; one a rule closes is
+  // stopped before it loads. Videos opened inside YouTube are caught by the tick instead. With YouTube's
+  // access withheld the tick cannot see the page, so a video whose rule counts time is not let through:
+  // its minutes could not be counted. A free video can be, since nothing is counted there.
+  const youtubeBlind = blind.some((d) => d === "youtube.com" || d === "youtu.be");
+  const allowVideos = [], closeVideos = [];
+  const recent = Object.entries(s.judged || {}).sort((a, b) => b[1].at - a[1].at);
+  for (const [key, j] of recent) {
+    if (!j.rule) continue;
+    const d = decide(s, { url: "https://www.youtube.com/watch?v=" + key.slice(3), now });
+    if (!d.video) continue;
+    if (d.verdict === "allow") { if (!(youtubeBlind && d.watched)) allowVideos.push(key); }
+    else closeVideos.push(key);
+  }
+  return {
+    redirect: closed, block: [...new Set([...closed, ...blind])], blind,
+    allowVideos: allowVideos.slice(0, MAX_ALLOWED_VIDEOS), closeVideos: closeVideos.slice(0, MAX_ALLOWED_VIDEOS),
+  };
 }
 
 // ---------- changing the rules ----------
@@ -290,7 +414,7 @@ export function cleanRules(rules, fallback) {
   }
   const ds = Number(r.dayStart);
   const dayStart = Number.isInteger(ds) && ds >= 0 && ds <= 23 ? ds : fallback.dayStart;
-  return { kinds, sites, dayStart };
+  return { kinds, sites, videos: cleanVideos(r.videos), dayStart };
 }
 
 /**
@@ -315,7 +439,9 @@ export function tighten(cur, next, state) {
     const pick = stricter ? next.sites : cur.sites;
     if (pick && d in pick) sites[d] = pick[d];
   }
-  return { ...next, kinds, sites, dayStart: cur.dayStart };
+  const youtube = kindUnder(cur, "youtube.com"); // the kind YouTube's own pages count against today
+  const videos = tightenVideos(cur.videos || [], next.videos || [], { watched: !!(youtube && kinds[youtube]) });
+  return { ...next, kinds, sites, videos, dayStart: cur.dayStart };
 }
 
 function canon(v) {
@@ -341,6 +467,7 @@ export function describeChanges(cur, next) {
     else if (!a && b) out.push({ site: d, text: `${d}: counted as ${label(b).toLowerCase()}` });
     else if (a !== b) out.push({ site: d, text: `${d}: ${label(a).toLowerCase()} → ${label(b).toLowerCase()}` });
   }
+  out.push(...describeVideoChanges(cur.videos || [], next.videos || []));
   if (cur.dayStart !== next.dayStart) out.push({ text: `The day starts at ${next.dayStart}:00` });
   return out;
 }
@@ -397,8 +524,9 @@ export function gateRequest(state, { url, message, now }) {
   const t = s.clock.floor;
   const d = decide(s, { url, now: t });
   const text = String(message || "").trim();
-  if (!s.talk) return { refused: "no_consent" };
+  if (!consented(s, "talk")) return { refused: "no_consent" };
   if (d.verdict === "allow") return { refused: "open" };
+  if (d.video) return { refused: "video_rule" }; // a video rule is changed on the rules page, not argued at the gate
   const cool = (s.cooldowns || {})[d.kind] || 0;
   if (cool > t) return { refused: "cooldown", until: cool };
   if ((s.usage.passes[d.kind] || 0) >= PASS_LADDER.length) return { refused: "passes_used" };
@@ -450,9 +578,84 @@ export function applyGateAnswer(state, { url, answer, now }) {
 }
 
 export function setTalk(state, on) {
-  return { ...state, talk: !!on };
+  return { ...setConsent(state, "talk", on), talk: !!on };
 }
 
 export function setSorting(state, on) {
-  return { ...state, sorting: !!on, unknown: on ? state.unknown || {} : {} };
+  return { ...setConsent(state, "sorting", on), sorting: !!on, unknown: on ? state.unknown || {} : {} };
+}
+
+// ---------- consent ----------
+
+/** Whether the user said yes to the present text of this switch. */
+export function consented(state, name) {
+  return !!CONSENT[name] && (state.consent || {})[name] === CONSENT[name];
+}
+
+/** Record a yes (to the present text) or a no. Turning judging off forgets what Claude judged. */
+export function setConsent(state, name, on) {
+  const consent = { ...(state.consent || {}) };
+  if (on && CONSENT[name]) consent[name] = CONSENT[name];
+  else delete consent[name];
+  let s = { ...state, consent };
+  if (name === "judge" && !on) {
+    s = { ...s, judged: Object.fromEntries(Object.entries(s.judged || {}).filter(([, j]) => j.by !== "claude")) };
+  }
+  return s;
+}
+
+/** Each switch: on, and whether the text agreed to is older than the present one (ask again). */
+export function consentStatus(state) {
+  const out = {};
+  for (const name of Object.keys(CONSENT)) {
+    const v = (state.consent || {})[name];
+    out[name] = { on: consented(state, name), outdated: !!v && v !== CONSENT[name] };
+  }
+  return out;
+}
+
+// ---------- the rules chat ----------
+
+/** The rules the user last asked for: what waits for the morning if anything does, else what is in force. */
+export function wantedRules(state) {
+  return state.pending ? state.pending.rules : state.rules;
+}
+
+/**
+ * What the rules chat sends to the relay for one message, or why it sends nothing: the message, the earlier
+ * turns of this conversation, the rules the user last asked for (no usage), and today's date.
+ */
+export function chatRequest(state, { message, history = [], now }) {
+  const s = rollover(state, now);
+  const text = String(message || "").trim();
+  if (!consented(s, "chat")) return { refused: "no_consent" };
+  if (!text) return { refused: "empty" };
+  const turns = (Array.isArray(history) ? history : []).slice(-6)
+    .filter((h) => h && (h.role === "user" || h.role === "gatekeeper") && typeof h.text === "string" && h.text.trim())
+    .map((h) => ({ role: h.role, text: h.text.trim().slice(0, MAX_MESSAGE) }));
+  return {
+    payload: {
+      installId: s.installId, message: text.slice(0, MAX_MESSAGE), history: turns,
+      rules: rulesForChat(wantedRules(s)), today: dayKey(s.clock.floor, s.rules.dayStart),
+    },
+  };
+}
+
+/**
+ * What the relay's answer would change, without changing anything: the rules the user would have, what
+ * would apply now and what would wait for the morning. The card is built from this, so it can only show
+ * what proposeRules will do when the user presses Apply.
+ */
+export function chatPreview(state, answer, now) {
+  const reply = answer && typeof answer.reply === "string" ? answer.reply.slice(0, 500) : "";
+  const question = answer && typeof answer.question === "string" && answer.question.trim() ? answer.question.slice(0, 300) : null;
+  if (!answer || (!reply && !question)) return { error: "bad_answer" };
+  const s = rollover(state, now);
+  const { rules, skipped, needsAccess } = applyDiff(wantedRules(s), question ? [] : answer.diff);
+  const r = proposeRules(s, rules, now);
+  // Only what this answer changes: a loosening already waiting for the morning is not shown again.
+  const before = proposeRules(s, wantedRules(s), now);
+  const fresh = (list, old) => { const seen = new Set(old.map((c) => c.text)); return list.filter((c) => !seen.has(c.text)); };
+  const nowChanges = fresh(r.now, before.now), later = fresh(r.later, before.later);
+  return { reply, question, rules, now: nowChanges, later, from: later.length ? r.from : null, skipped: skipped.length, needsAccess };
 }

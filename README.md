@@ -23,6 +23,14 @@ This is the product: anyone can install it, with no account. Maxime's personal v
 - **Unknown sites are sorted.** When a site that is neither in the catalog nor one of yours has been in front for a minute, Claude is asked once which kind it is. The answer is kept on this device, and the site counts against that kind from then on. A failed sort is retried after an hour. Sorting needs the browser's permission to see every site, asked for when you turn it on.
 - What is sent, to the [relay](../gatekeeper-relay) (which holds the Anthropic key and keeps none of it): for a gate message, the site's domain and kind, today's minutes and budget for that kind, your goal sentence, what you typed, and a random install number; for a sort, the domain, the page title and the install number. Never the page's path, its content, other tabs, or your other rules.
 
+**Milestone 3: rules by chat, and YouTube video rules** (branch `rules-chat`; design in `~/brain/outputs/html/2026-10-16-gatekeeper-rules-by-talking.html`). Each is off until the user says yes.
+
+- **The rules chat**, at the top of the rules page. Type or dictate what to change ("block YouTube videos about video games but keep educational ones"). The relay's `/rules` turns it into a list of operations; the engine applies them to a copy of the rules and runs `proposeRules`, so the card shows only what Apply will really do: what changes now, and what waits for the morning. Claude may ask one question instead. Nothing changes until Apply. Sent: the message, the chat's earlier turns, the rules last asked for, today's date and the install number; never usage.
+- **Video rules** (`extension/engine/videos.js`): a rule in words about a kind of YouTube video, with an exception and its own daily time: 0 closes those videos, minutes give them their own budget, `null` makes them free. A matched video counts against its rule, never against Video. Only a clearly stricter change applies now; a new rule with time of its own or free waits for the morning, unless YouTube's own kind is not watched at all.
+- **Judging a video** happens once per video ID: the hands ask YouTube's oEmbed address for the title and channel, then the relay's `/judge` (with the user's yes to "Judge videos with Claude") or the rule's word lists on the device. A judged video a rule closes is redirected before it loads; one a rule lets through stays reachable while YouTube itself is closed. A video opened from inside YouTube is caught by the next tick, so a newly seen video under a closing rule plays for a few seconds first.
+- **Consent has versions** (`CONSENT` in the engine). A yes is kept with the version of the text agreed to; raising a version turns that switch off and the rules page says why. A yes given before versions counts as version 1.
+- The gate does not argue with a video rule: it names the rule and points to the rules page.
+
 ## How it is built
 
 | Part | Where | What it does |
@@ -52,7 +60,7 @@ To try the Claude features before the relay is deployed, run it locally: in `~/g
 npm test
 ```
 
-33 tests under node, no dependencies: the engine (budgets, loosening, passes, the gate's request and answer, sorting, and the QA findings of 2026-10-16 in `test/qa.test.mjs`), the redirect and block rules, and the manifest against the catalog.
+47 tests under node, no dependencies, including video rules and the chat in `test/videos.test.mjs`: the engine (budgets, loosening, passes, the gate's request and answer, sorting, and the QA findings of 2026-10-16 in `test/qa.test.mjs`), the redirect and block rules, and the manifest against the catalog.
 
 ```sh
 npm run e2e
@@ -65,6 +73,12 @@ npm run e2e:qa
 ```
 
 The QA findings that need a real browser: a watched site with access withheld is blocked and flagged, embedded players of a closed kind are blocked, every open tab of a kind goes to the gate when it closes, the private-window warnings show, and the welcome tab says nothing leaves the browser when Claude is off.
+
+```sh
+npm run e2e:videos
+```
+
+Milestone 3 in headless Brave: the chat turns the example sentence into a card, Apply makes two video rules, a game video goes to the gate and an educational one stays open, also once Video is closed for the day; Claude sees the title and channel and never the address; turning judging off forgets Claude's judgments. YouTube is a local HTTPS server that the browser resolves `www.youtube.com` to, so no real YouTube page is loaded. Needs `openssl`, Brave and the relay as for `npm run e2e`.
 
 ```sh
 npm run e2e:stale
