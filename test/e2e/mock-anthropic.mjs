@@ -1,6 +1,6 @@
 // A fake Anthropic Messages API for the end-to-end run, answering the way ~/gatekeeper-relay's own
 // scripts/mock-anthropic.mjs does, plus one local test game (agar.io is in the built-in catalog, so the
-// extension never needs to sort it). No network, no key.
+// extension never needs to sort it), and the video judge and rules chat of milestone 3. No network, no key.
 import { createServer } from "node:http";
 
 const KINDS = { "agar.io": "games", "mygame.localhost": "games", "instagram.com": "social" };
@@ -11,7 +11,29 @@ function answer(body) {
     const domain = /^domain: (.+)$/m.exec(user)?.[1] ?? "";
     return { kind: KINDS[domain] ?? "other" };
   }
-  const message = /<message>\n([\s\S]*)\n<\/message>/.exec(user)?.[1] ?? "";
+  if (body.system?.includes("You judge single videos")) {
+    const title = /<title>(.*)<\/title>/.exec(user)?.[1] ?? "";
+    if (/lecture|explained|tutorial/i.test(title)) return { rule: /- id: (v\d+)\n  about: educational/.exec(user)?.[1] ?? "none" };
+    if (/minecraft|fortnite|gameplay/i.test(title)) return { rule: /- id: (v\d+)\n  about: video games/.exec(user)?.[1] ?? "none" };
+    return { rule: "none" };
+  }
+  if (body.system?.includes("You change the rules of Gatekeeper")) {
+    const said = /<message>\n([\s\S]*)\n<\/message>/.exec(user)?.[1] ?? "";
+    if (/video games/i.test(said)) {
+      return {
+        reply: "You gave no limit for educational videos, so they are free.",
+        question: null,
+        diff: [
+          { op: "addVideo", site: "youtube.com", about: "video games: gameplay, let's plays, streams", except: "educational videos about games",
+            minutes: 0, words: { match: ["minecraft", "fortnite", "gameplay"], except: ["lecture", "explained", "tutorial"] } },
+          { op: "addVideo", site: "youtube.com", about: "educational: lectures, tutorials, explainers", except: "",
+            minutes: null, words: { match: ["lecture", "explained", "tutorial"], except: [] } },
+        ],
+      };
+    }
+    return { reply: "", question: "Which sites or videos, and how many minutes a day?", diff: [] };
+  }
+const message = /<message>\n([\s\S]*)\n<\/message>/.exec(user)?.[1] ?? "";
   if (/lecture/i.test(message)) return { decision: "allow", minutes: 30, reply: "Go get the lecture recording." };
   if (/class/i.test(message)) return { decision: "ask", minutes: 0, reply: "Which class, and what do you need?" };
   return { decision: "deny", minutes: 0, reply: "No." };

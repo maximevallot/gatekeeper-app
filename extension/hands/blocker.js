@@ -19,24 +19,29 @@ export function domainRegex(domain) {
   return "^https?://([^/?#@]*\\.)?" + escape(domain) + "\\.?([:/?#].*)?$";
 }
 
-/** The whole address of one YouTube video page, watch, shorts or youtu.be, from its key "yt:<id>". */
-export function videoRegex(key) {
-  const id = escape(key.slice(3));
-  return "^https?://(([^/?#@]*\\.)?youtube\\.com/(watch\\?([^#]*&)?v=" + id + "|(shorts|live)/" + id + ")|(www\\.)?youtu\\.be/" + id + ")([&?#/].*)?$";
+/**
+ * The addresses of one YouTube video, from its key "yt:<id>", as urlFilter patterns: watch (v first or
+ * later), shorts, live and youtu.be. A regular expression covering them all is over Chrome's 2 KB limit for
+ * a compiled regexFilter, and the browser then rejects every rule written with it.
+ */
+export function videoFilters(key) {
+  const id = key.slice(3);
+  return [`||youtube.com/watch?v=${id}^`, `||youtube.com/watch?*&v=${id}^`, `||youtube.com/shorts/${id}^`, `||youtube.com/live/${id}^`, `||youtu.be/${id}^`];
 }
 
 export function buildRules({ redirect = [], block = [], allowVideos = [], closeVideos = [] }, gatePage) {
   let id = 1;
   const rules = [];
   for (const key of allowVideos) {
-    rules.push({ id: id++, priority: 3, action: { type: "allow" }, condition: { regexFilter: videoRegex(key), resourceTypes: ["main_frame"] } });
+    for (const urlFilter of videoFilters(key)) {
+      rules.push({ id: id++, priority: 3, action: { type: "allow" }, condition: { urlFilter, resourceTypes: ["main_frame"] } });
+    }
   }
   for (const key of closeVideos) {
-    rules.push({
-      id: id++, priority: 2,
-      action: { type: "redirect", redirect: { regexSubstitution: gatePage + "#\\0" } },
-      condition: { regexFilter: videoRegex(key), resourceTypes: ["main_frame"] },
-    });
+    const url = gatePage + "#https://www.youtube.com/watch?v=" + key.slice(3);
+    for (const urlFilter of videoFilters(key)) {
+      rules.push({ id: id++, priority: 2, action: { type: "redirect", redirect: { url } }, condition: { urlFilter, resourceTypes: ["main_frame"] } });
+    }
   }
   for (const domain of redirect) {
     rules.push({

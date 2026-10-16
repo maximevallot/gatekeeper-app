@@ -110,16 +110,17 @@ const looseness = (m) => (m === 0 ? 0 : m === null ? Infinity : m);
  * The stricter of the video rules in force (cur) and those asked for (next), rule by rule, by id.
  * A change applies now only when it is clearly stricter: a new rule that closes, a lower budget, or removing
  * a rule that made videos free. Everything else waits for the morning: a new rule with time of its own or
- * free, a higher budget, removing a rule that closed or limited. A rule's wording never changes in place;
- * the chat rewords by removing one rule and adding another.
+ * free, a higher budget, removing a rule that closed or limited. When the site's own kind is not watched
+ * (`watched` false), its videos have no limit today, so any new rule is at least as strict and applies now.
+ * A rule's wording never changes in place; the chat rewords by removing one rule and adding another.
  */
-export function tightenVideos(cur = [], next = []) {
+export function tightenVideos(cur = [], next = [], { watched = true } = {}) {
   const byId = (l) => new Map(l.map((v) => [v.id, v]));
   const a = byId(cur), b = byId(next);
   const out = [];
   for (const v of next) {
     const old = a.get(v.id);
-    if (!old) { if (v.minutes === 0) out.push(v); continue; }
+    if (!old) { if (v.minutes === 0 || !watched) out.push(v); continue; }
     out.push({ ...old, minutes: looseness(v.minutes) <= looseness(old.minutes) ? v.minutes : old.minutes });
   }
   for (const old of cur) {

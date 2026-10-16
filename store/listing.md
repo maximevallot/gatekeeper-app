@@ -67,3 +67,24 @@ Limit the time you spend on distracting websites. You give each kind of site a d
 
 - Contact email: mvallot22@gmail.com (verified).
 - Trader status: non-trader while Gatekeeper is free. Switch to trader before charging anyone.
+
+## For the version with the rules chat and video rules (not 0.1.1)
+
+Use these only for the build that has the rules chat and YouTube video rules (branch `rules-chat`), and only after the relay with `/rules`, `/judge` and the matching `/privacy` is deployed. An earlier build listed with them would be a misleading listing.
+
+**Description: add after the two AI features**
+
+- Changing your rules by writing to it. Type, or dictate, "block YouTube videos about video games but keep educational ones", and Gatekeeper shows the change as a card; nothing changes until you press Apply, and loosening still waits for the morning.
+- Rules about kinds of YouTube videos, each with its own daily time: closed, its own minutes, or free. Claude can judge each video you open from its title and channel, or Gatekeeper matches words on your computer.
+
+**Description: "Your data" paragraph, replacing the 0.1.1 one**
+
+Your data: your rules, budgets and history stay in your browser. Gatekeeper never reads page content. The AI features send only what they need, and only after you say yes: for a message at the gate, the site's name and kind, today's minutes and budget for that kind, your goal sentence and what you type; for sorting, a new site's name and page title; for the rules chat, what you write and your rules, never your time on sites; for judging videos, a YouTube video's title and channel and your video rules' wording, never its address. Nothing is sold or used for advertising.
+
+**Permission justifications: host permissions, replacing the 0.1.1 line**
+
+- Host permissions (the built-in list of social, video, game, news and shopping sites, and the extension's relay): Needed to close those sites when their budget is used up; on YouTube, to read the address and title of the video in front and to ask YouTube's oEmbed address for its title and channel, so the user's video rules can be applied; and to reach the relay for the optional AI features.
+
+No permission is added: the update shows no new warning and does not disable existing installs.
+
+**Data usage, what to tick:** the same boxes as 0.1.1. Website content now also covers video titles and channels; user activity / personal communications now also covers what the user writes in the rules chat.

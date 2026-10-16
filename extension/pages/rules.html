@@ -15,6 +15,22 @@
   <div id="pending" class="note hidden"></div>
   <div id="result" class="ok hidden"></div>
 
+  <section id="chat">
+    <h2>Tell Gatekeeper what to change</h2>
+    <p class="muted">In your own words, typed or dictated (Wispr Flow, or Fn twice on a Mac). You get a card of the change; nothing changes until you press Apply.</p>
+    <div class="log" id="chat-log"></div>
+    <div id="chat-consent" class="note hidden">
+      <p>To answer, Gatekeeper sends what you write here, the earlier messages of this chat, your rules (kinds and their minutes, your own sites, your video rules, when the day starts), today's date and a random install number to Gatekeeper's relay, which asks Anthropic's Claude and keeps none of it. Your time on sites is never sent. You can turn this off below.</p>
+      <button class="primary" id="chat-yes" type="button">Yes, send it</button>
+      <button class="link" id="chat-no" type="button">No</button>
+    </div>
+    <div id="card" class="card hidden"></div>
+    <form id="chat-form" class="ask">
+      <textarea id="chat-message" rows="2" maxlength="500" placeholder="Block YouTube videos about video games but keep educational ones"></textarea>
+      <button class="primary" id="chat-send" type="submit">Send</button>
+    </form>
+  </section>
+
   <section>
     <h2>Kinds of sites</h2>
     <p class="muted">A daily budget for each kind you watch. 0 closes it all day.</p>
@@ -33,17 +49,28 @@
   </section>
 
   <section>
+    <h2>YouTube video rules</h2>
+    <p class="muted">Rules about kinds of videos, made in the chat above. Each has its own daily time: closed, its own minutes, or free. A video a rule matches does not count against Video.</p>
+    <div id="videos"></div>
+  </section>
+
+  <section>
     <h2>What you're working toward</h2>
     <input type="text" id="goal" maxlength="300" autocomplete="off">
   </section>
 
   <section>
     <h2>Claude</h2>
-    <p class="muted">Both are off until you turn them on. What is sent goes to Gatekeeper's relay, which asks Anthropic's Claude and keeps none of it.</p>
+    <p class="muted">All are off until you turn them on. What is sent goes to Gatekeeper's relay, which asks Anthropic's Claude and keeps none of it.</p>
+    <div id="consent-outdated" class="note hidden">What one of these sends has changed since you said yes, so it is off until you turn it on again.</div>
     <label class="switch"><input type="checkbox" id="talk">
       <span><b>The gate can talk back.</b> <span class="muted">At a closed site you can say what you need it for, and Claude may open it for a few minutes. Sent: the site's domain and kind, today's minutes and budget, your goal sentence, what you type, and a random install number.</span></span></label>
     <label class="switch"><input type="checkbox" id="sorting">
       <span><b>Sort sites Gatekeeper doesn't know.</b> <span class="muted">After a minute on a site not in its list, Claude says which kind it is, so a new game counts as a game. Sent: the site's domain, its page title, and a random install number. Your browser will ask to let Gatekeeper see every site.</span></span></label>
+    <label class="switch"><input type="checkbox" id="chat-switch">
+      <span><b>Change rules by chat.</b> <span class="muted">Claude turns what you write above into a change for you to apply. Sent: what you write, the earlier messages of the chat, your rules and today's date, and a random install number. Never your time on sites.</span></span></label>
+    <label class="switch"><input type="checkbox" id="judge">
+      <span><b>Judge videos with Claude.</b> <span class="muted">With a video rule, Claude says which rule each YouTube video you open falls under. Sent: the video's title and channel, the wording of your video rules, and a random install number; never its address. Gatekeeper gets the title and channel from YouTube. Off, your video rules match their words on this device, which is rougher.</span></span></label>
   </section>
 
   <button class="primary" id="save">Save</button>

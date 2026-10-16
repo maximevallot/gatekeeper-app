@@ -3,6 +3,7 @@
 // at a time. The only network calls go to the relay (hands/relay.js), and only after the user said yes.
 
 import * as engine from "../engine/engine.js";
+import { videoUrl, videoKeyOf } from "../engine/videos.js";
 import { buildRules } from "./blocker.js";
 import { callRelay } from "./relay.js";
 import { PROTOCOL } from "../protocol.js";
@@ -58,7 +59,7 @@ async function withheldDomains() {
 async function syncBlocking() {
   const e = engine.enforcement(state, Date.now(), { withheld: await withheldDomains() });
   blind = e.blind;
-  const key = JSON.stringify([e.redirect, e.block]);
+  const key = JSON.stringify([e.redirect, e.block, e.allowVideos, e.closeVideos]);
   if (key !== blocking) {
     const old = await chrome.declarativeNetRequest.getDynamicRules();
     await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: old.map((r) => r.id), addRules: buildRules(e, GATE) });
@@ -115,6 +116,7 @@ async function tick() {
   }
   const url = front;
   if (out.sort) sortSite(out.sort, tab.title || "");
+  if (out.judge) judgeVideo(out.judge);
   const d = out.decision;
   if (d.verdict !== "allow") {
     await chrome.tabs.update(tab.id, { url: gateUrl(url) });
@@ -132,6 +134,42 @@ async function sortSite(domain, title) {
   await update((st) => ({ state: kind ? engine.recordSort(st, domain, kind) : engine.sortFailed(st, domain, Date.now()) }));
 }
 
+/**
+ * Which video rule a video falls under. YouTube's public oEmbed address gives its title and channel (a host
+ * Gatekeeper already holds); then the relay asks Claude if the user said yes, else the rules' words decide
+ * on this device. A video whose title cannot be had falls under no rule and counts against Video.
+ */
+const judgingNow = new Set();
+async function judgeVideo(key) {
+  if (judgingNow.has(key)) return;
+  judgingNow.add(key);
+  try {
+    let title = "", channel = "";
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const res = await fetch("https://www.youtube.com/oembed?format=json&url=" + encodeURIComponent(videoUrl(key)), { credentials: "omit", signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok) ({ title = "", author_name: channel = "" } = await res.json());
+    } catch {}
+    const req = engine.judgeRequest(await load(), key, { title, channel });
+    let rule = req.local ?? null, by = "words";
+    if (req.payload) {
+      const r = await callRelay("/judge", req.payload);
+      if (r.ok && r.data.judged === true) {
+        rule = r.data.rule;
+        by = "claude";
+      } else {
+        rule = req.fallback; // the relay could not judge: the words decide
+      }
+    }
+    await update((s) => ({ state: engine.recordJudgment(s, key, rule, by, Date.now()) }));
+    tick(); // a video that is now closed goes to the gate at once
+  } finally {
+    judgingNow.delete(key);
+  }
+}
+
 function badge(text) {
   chrome.action.setBadgeText({ text });
   chrome.action.setBadgeBackgroundColor({ color: text === "!" ? "#c2410c" : "#3b5bdb" });
@@ -146,14 +184,17 @@ const handlers = {
   async state() {
     const s = engine.rollover(await load(), Date.now());
     const incognito = await chrome.extension.isAllowedIncognitoAccess();
-    return { state: s, now: Date.now(), closed: engine.closedKinds(s, Date.now()), blind, incognito };
+    return { state: s, now: Date.now(), closed: engine.closedKinds(s, Date.now()), blind, incognito, consent: engine.consentStatus(s) };
   },
   async decide({ url }) {
     await update((s) => ({ state: engine.rollover(s, Date.now()) }));
+    // A video stopped before it loaded, not judged yet: judge it now; the gate asks again in a moment.
+    const judging = engine.needsJudgment(state, url);
+    if (judging) judgeVideo(videoKeyOf(url));
     const decision = engine.decide(state, { url, now: Date.now() });
     const cooldownUntil = (state.cooldowns || {})[decision.kind] || 0;
     const incognito = await chrome.extension.isAllowedIncognitoAccess();
-    return { decision, goal: state.goal, talk: state.talk, cooldownUntil: cooldownUntil > state.clock.floor ? cooldownUntil : 0, incognito, blind };
+    return { decision, goal: state.goal, talk: engine.consented(state, "talk"), cooldownUntil: cooldownUntil > state.clock.floor ? cooldownUntil : 0, incognito, blind, judging };
   },
   // One message at the gate. The relay is asked only if the engine says there is something to ask.
   async talk({ url, message }) {
@@ -165,15 +206,29 @@ const handlers = {
     return out.result;
   },
   // The pages ask for the all-sites permission themselves, inside the click; this records the answer.
-  async consent({ talk, sorting }) {
+  async consent({ talk, sorting, chat, judge }) {
     if (sorting && !(await chrome.permissions.contains(ALL_SITES))) sorting = false;
     await update((s) => {
       let n = s;
       if (talk !== undefined) n = engine.setTalk(n, talk);
       if (sorting !== undefined) n = engine.setSorting(n, sorting);
+      if (chat !== undefined) n = engine.setConsent(n, "chat", chat);
+      if (judge !== undefined) n = engine.setConsent(n, "judge", judge);
       return { state: n };
     });
-    return { talk: state.talk, sorting: state.sorting };
+    return {
+      talk: engine.consented(state, "talk"), sorting: engine.consented(state, "sorting") && state.sorting,
+      chat: engine.consented(state, "chat"), judge: engine.consented(state, "judge"),
+    };
+  },
+  // One message in the rules chat. Nothing changes here: the answer comes back as a card to apply or not.
+  async chat({ message, history }) {
+    const req = engine.chatRequest(await load(), { message, history, now: Date.now() });
+    if (req.refused) return { refused: req.refused };
+    const r = await callRelay("/rules", req.payload);
+    if (!r.ok) return { failed: r.error || "unreachable", scope: r.scope };
+    const preview = engine.chatPreview(await load(), r.data, Date.now());
+    return preview.error ? { failed: preview.error } : preview;
   },
   async setup({ kinds, goal }) {
     const out = await update((s) => engine.completeSetup(s, { kinds, goal }, Date.now()));

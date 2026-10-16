@@ -39,7 +39,7 @@ export const AFTER_PASS_MS = 15 * 60e3; // after a pass ends, the gate does not 
 export const FOLLOW_UP_MS = 10 * 60e3; // one follow-up to a question, within this long
 export const MAX_MESSAGE = 500;
 export const JUDGE_RETRY_MS = 60e3; // a judgment in flight is asked again after this long
-export const MAX_ALLOWED_VIDEOS = 100; // video pages let through a closed site, at most
+export const MAX_ALLOWED_VIDEOS = 50; // judged videos given a rule of their own in the browser, per list (five filters each)
 
 // The version of each consent text. Raise one when what that switch sends changes: the user is asked again.
 // talk: the gate. sorting: unknown sites. chat: the rules chat. judge: video rules judged by Claude.
@@ -436,7 +436,9 @@ export function tighten(cur, next, state) {
     const pick = stricter ? next.sites : cur.sites;
     if (pick && d in pick) sites[d] = pick[d];
   }
-  return { ...next, kinds, sites, videos: tightenVideos(cur.videos || [], next.videos || []), dayStart: cur.dayStart };
+  const youtube = kindUnder(cur, "youtube.com"); // the kind YouTube's own pages count against today
+  const videos = tightenVideos(cur.videos || [], next.videos || [], { watched: !!(youtube && kinds[youtube]) });
+  return { ...next, kinds, sites, videos, dayStart: cur.dayStart };
 }
 
 function canon(v) {

@@ -90,6 +90,9 @@ test("an unjudged video counts against Video and is asked about once; a judged g
   // And the next time it is opened, it is stopped before it loads.
   const e = enforcement(s, first.now);
   assert.deepEqual(e.closeVideos, ["yt:GAMEvid0001"]);
+  const close = buildRules(e, "chrome-extension://x/pages/gate.html").filter((x) => x.condition.urlFilter);
+  assert.equal(close.length, 5);
+  assert.ok(close.every((x) => x.action.redirect.url === "chrome-extension://x/pages/gate.html#" + GAME));
 });
 
 test("the next morning: educational videos are free, even after Video's 20 minutes are spent", () => {
@@ -108,10 +111,11 @@ test("the next morning: educational videos are free, even after Video's 20 minut
   assert.ok(e.redirect.includes("youtube.com"));
   assert.deepEqual(e.allowVideos, ["yt:LECTvid0001"]);
   const rules = buildRules(e, "chrome-extension://x/pages/gate.html");
-  const allow = rules.find((x) => x.action.type === "allow");
-  assert.ok(new RegExp(allow.condition.regexFilter).test(LECTURE));
-  assert.ok(!new RegExp(allow.condition.regexFilter).test(OTHER));
-  assert.ok(allow.priority > Math.max(...rules.filter((x) => x.action.type !== "allow").map((x) => x.priority)));
+  const allow = rules.filter((x) => x.action.type === "allow");
+  assert.deepEqual(allow.map((x) => x.condition.urlFilter), [
+    "||youtube.com/watch?v=LECTvid0001^", "||youtube.com/watch?*&v=LECTvid0001^", "||youtube.com/shorts/LECTvid0001^",
+    "||youtube.com/live/LECTvid0001^", "||youtu.be/LECTvid0001^"]);
+  assert.ok(allow[0].priority > Math.max(...rules.filter((x) => x.action.type !== "allow").map((x) => x.priority)));
 });
 
 test("a rule with its own budget: educational videos get an hour, apart from Video's 20 minutes", () => {
@@ -135,6 +139,16 @@ test("only a clearly stricter video change applies now", () => {
   assert.deepEqual(tightenVideos([], [v("v1", 0), v("v2", 30), v("v3", null)]).map((x) => x.id), ["v1"]);
   // Removing: a free rule goes now; a closing or limiting one waits.
   assert.deepEqual(tightenVideos([v("v1", null), v("v2", 0), v("v3", 30)], []).map((x) => x.id), ["v2", "v3"]);
+  // With YouTube not watched at all, its videos have no limit today: any new rule applies now.
+  assert.deepEqual(tightenVideos([], [v("v1", 0), v("v2", 30), v("v3", null)], { watched: false }).map((x) => x.id), ["v1", "v2", "v3"]);
+});
+
+test("with Video not watched, the example applies at once", () => {
+  let s = completeSetup(initialState(), { kinds: { games: 15 }, goal: "" }, MON_2PM).state;
+  s = setConsent(s, "chat", true);
+  const p = chatPreview(s, EXAMPLE, MON_2PM);
+  assert.equal(p.now.length, 2);
+  assert.deepEqual(p.later, []);
 });
 
 test("judging: by Claude with the user's yes, by words on this device without it", () => {
