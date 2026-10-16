@@ -66,9 +66,19 @@ $("add-site").addEventListener("click", () => {
   let d = $("new-site").value.trim().toLowerCase();
   try { d = new URL(d.includes("://") ? d : "https://" + d).hostname.replace(/^www\./, ""); } catch { return; }
   if (!d.includes(".")) return;
-  draft.sites = { ...(draft.sites || {}), [d]: $("new-kind").value };
-  $("new-site").value = "";
-  renderSites();
+  const kind = $("new-kind").value;
+  // Gatekeeper may act only on the sites in its catalog; any other site is asked for here, one at a time,
+  // and the browser asks the user. The request has to start inside the click.
+  chrome.permissions.request({ origins: [`*://*.${d}/*`] }).then((granted) => {
+    if (!granted) {
+      flash(`Gatekeeper needs access to ${d} to count time there and close it. Nothing was added.`);
+      return;
+    }
+    draft.sites = { ...(draft.sites || {}), [d]: kind };
+    $("new-site").value = "";
+    renderSites();
+    flash(`${d} will count as ${label(kind).toLowerCase()} once you save.`);
+  });
 });
 
 function flash(text, list = []) {

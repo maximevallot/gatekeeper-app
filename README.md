@@ -24,7 +24,7 @@ No network calls, no accounts, no money. Everything stays in the browser.
 
 Rules are kinds plus budgets ("games: 15 min a day"), not lists of domains, so agar.io counts against games without being named, and the same rules can drive an iPhone later, where Screen Time only exposes app categories.
 
-Permissions: `storage`, `declarativeNetRequest`, `idle`, `alarms`, and access to all sites, needed to read the front tab's address and to redirect a closed site.
+Permissions: `storage`, `declarativeNetRequestWithHostAccess`, `idle`, `alarms`, and host access to the catalog's sites only, written into the manifest from the catalog by `node scripts/sync-manifest.mjs` (a test fails if they drift). A site you add yourself is asked for when you add it, one site at a time. No content scripts, so nothing reads pages. The gate page is the one file web pages can reach, under a per-session address: a link to a closed site from any other site has to be able to land on it.
 
 ## Load it
 
