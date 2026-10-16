@@ -51,7 +51,9 @@ Limit the time you spend on distracting websites. You give each kind of site a d
 **Data usage, what to tick:**
 - Web history: yes (the domain of the site, sent only by the optional AI features).
 - Website content: yes (the page title, sent only when sorting an unknown site).
-- User activity / personal communications: yes for whichever box covers text the user types (the message at the gate).
+- Personal communications: yes (the message typed at the gate).
+- Location: yes (the relay uses the network address, which Google lists under Location, to cap daily use per network).
+- User activity: no (activity is checked only to count time, on the device).
 - Everything else: no.
 - Tick all three certifications.
 
