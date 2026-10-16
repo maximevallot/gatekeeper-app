@@ -1,7 +1,7 @@
 // The gate. It says what is closed, how much was used, when it reopens, and the user's own sentence about
 // what they are working toward. One box takes a real need to Claude through the relay: allow opens the
 // site for a few minutes, ask allows one follow-up, and no, or any error, keeps it shut.
-import { ask, when, el, checkWorker } from "./common.js";
+import { ask, when, el, checkWorker, warnings } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 const url = location.hash.slice(1); // the page that was stopped, exactly as it was asked for
@@ -29,13 +29,13 @@ async function show() {
   $("goal-box").classList.toggle("hidden", !goal);
   $("rules-link").href = chrome.runtime.getURL("pages/rules.html");
   $("closed").classList.remove("hidden");
+  warnings(decided, $("closed"));
   talk = { on: decided.talk, host, kind: d.label };
   if (decided.cooldownUntil) shut(`We already talked about this. The answer stands until ${clock(decided.cooldownUntil)}.`);
   else $("message").focus();
 }
 
 let talk = { on: false };
-let turns = 0;
 const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 function say(text, me) {
@@ -89,13 +89,12 @@ async function send(text) {
   say(text, true);
   $("message").value = "";
   $("send").disabled = $("message").disabled = true;
-  turns += 1;
   let r;
-  try { r = await ask("talk", { url, message: text, lastTurn: turns > 1 }); } catch { r = { decision: "error" }; }
+  try { r = await ask("talk", { url, message: text }); } catch { r = { decision: "error" }; }
   $("send").disabled = $("message").disabled = false;
   if (r.decision === "allow") {
     say(r.reply);
-    shut(`Pass: ${r.minutes} minute${r.minutes === 1 ? "" : "s"}. Opening…`);
+    shut(`Pass: ${r.minutes} minute${r.minutes === 1 ? "" : "s"} on ${r.site}. Opening…`);
     setTimeout(() => location.replace(url), 1500);
   } else if (r.decision === "ask") {
     say(r.reply);
@@ -105,6 +104,8 @@ async function send(text) {
     shut(`The gate stays shut until ${clock(r.until)}.`);
   } else if (r.decision === "refused" && r.reason === "cooldown") {
     shut(`We already talked about this. The answer stands until ${clock(r.until)}.`);
+  } else if (r.decision === "refused" && r.reason === "passes_used") {
+    shut(`The gate has opened ${talk.kind.toLowerCase()} three times today, so it stays shut until tomorrow.`);
   } else if (r.decision === "refused" && r.reason === "open") {
     location.replace(url);
   } else if (r.error === "daily_limit") {

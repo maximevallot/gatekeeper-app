@@ -1,12 +1,15 @@
 import { KINDS, KIND_ORDER } from "../engine/catalog.js";
 import { DEFAULT_MINUTES, label } from "../engine/engine.js";
-import { ask, el, when, checkWorker } from "./common.js";
+import { ask, el, when, checkWorker, warnings } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 let draft = null; // the rules being edited: { kinds, sites, dayStart }
 
+let warned = false;
 async function load() {
-  const { state, now } = await ask("state");
+  const got = await ask("state");
+  const { state, now } = got;
+  if (!warned) warned = warnings(got, document.querySelector("h1").nextElementSibling.nextElementSibling) >= 0;
   draft = structuredClone(state.pending ? state.pending.rules : state.rules);
   $("goal").value = state.goal || "";
   renderPending(state, now);

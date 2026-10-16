@@ -12,11 +12,14 @@ This is the product: anyone can install it, with no account. Maxime's personal v
 - **Gate**: closed, minutes used, when it reopens, and your sentence.
 - **Rules page**: budgets per kind, your own sites counted against a kind, your goal, and the Claude switches. A change that loosens shows when it takes effect, and "Keep today's rules" cancels it.
 - Time counts against a kind only while its tab and window are in front and you are there: input in the last minute, or something playing.
-- A closed site is redirected to the gate before it loads.
+- A closed site is redirected to the gate before it loads, and blocked when embedded in another page. When a kind closes, every open tab of it goes to the gate. Time on a watched site playing sound counts in any window, including app windows and picture-in-picture.
+- Time only goes forward: setting the clock back neither restores a budget nor stretches a pass, a timezone change does not start a new day, and a pass is used up by the seconds that pass while the browser runs.
+- A site moved to another kind on the rules page follows the morning rule: to a kind with more time left, it waits.
+- If site access is withheld for a watched site, that site is blocked rather than opened, and the rules page and a "!" badge say so. Private windows are not covered unless the user allows it; the welcome tab, the rules page and the gate say how.
 
 **Milestone 2: Claude, through the relay.** Both are off until the user says yes.
 
-- **The gate talks back.** One box: "Need it for something real?". Before the first message, the gate says what will be sent and asks *Yes, send it* or *No*. On allow, the whole kind opens for the minutes Claude gave (1 to 10), then the gate comes back. On ask, one follow-up. On no, the gate stays shut for 10 minutes. On any error, it stays shut and says "Can't reach the gate right now".
+- **The gate talks back.** One box: "Need it for something real?". Before the first message, the gate says what will be sent and asks *Yes, send it* or *No*. On allow, the one site asked for opens for the minutes Claude gave: at most 10, then 5, then 2 for the same kind in a day, then no more; after a pass the gate rests for 15 minutes. On ask, one follow-up, counted by the background worker. On no, the gate stays shut for 10 minutes. On the relay's daily limit it says so; on any other error it stays shut and says "Can't reach the gate right now".
 - **Unknown sites are sorted.** When a site that is neither in the catalog nor one of yours has been in front for a minute, Claude is asked once which kind it is. The answer is kept on this device, and the site counts against that kind from then on. A failed sort is retried after an hour. Sorting needs the browser's permission to see every site, asked for when you turn it on.
 - What is sent, to the [relay](../gatekeeper-relay) (which holds the Anthropic key and keeps none of it): for a gate message, the site's domain and kind, today's minutes and budget for that kind, your goal sentence, what you typed, and a random install number; for a sort, the domain, the page title and the install number. Never the page's path, its content, other tabs, or your other rules.
 
@@ -31,7 +34,7 @@ This is the product: anyone can install it, with no account. Maxime's personal v
 
 Rules are kinds plus budgets ("games: 15 min a day"), not lists of domains, so a new game counts against games without being named, and the same rules can drive an iPhone later, where Screen Time only exposes app categories.
 
-Permissions: `storage`, `declarativeNetRequestWithHostAccess`, `idle`, `alarms`, host access to the catalog's sites and to the relay. Both are written into the manifest by `node scripts/sync-manifest.mjs` from the catalog and `config.js`, and a test fails if they drift. Seeing every site is optional, asked for when sorting is turned on, and given back when it is turned off; a site you add yourself is asked for one at a time. No content scripts, so nothing reads pages. The gate page is the one file web pages can reach, under a per-session address: a link to a closed site from any other site has to be able to land on it.
+Permissions: `storage`, `declarativeNetRequest` (a block holds even where site access is withheld), `idle`, `alarms`, host access to the catalog's sites and to the relay. Both are written into the manifest by `node scripts/sync-manifest.mjs` from the catalog and `config.js`, and a test fails if they drift. Seeing every site is optional, asked for when sorting is turned on, and given back when it is turned off; a site you add yourself is asked for one at a time. No content scripts, so nothing reads pages. The gate page is the one file web pages can reach, under a per-session address: a link to a closed site from any other site has to be able to land on it.
 
 ## Load it
 
@@ -49,13 +52,19 @@ To try the Claude features before the relay is deployed, run it locally: in `~/g
 npm test
 ```
 
-25 tests under node, no dependencies: the engine (budgets, loosening, passes, the gate's request and answer, sorting), the redirect patterns, and the manifest against the catalog.
+33 tests under node, no dependencies: the engine (budgets, loosening, passes, the gate's request and answer, sorting, and the QA findings of 2026-10-16 in `test/qa.test.mjs`), the redirect and block rules, and the manifest against the catalog.
 
 ```sh
 npm run e2e
 ```
 
 The whole extension against the real relay Worker under `wrangler dev`, with a fake Anthropic API and no key, in a throwaway headless Brave profile. A closed site's gate gets a pass and reopens the site; a game the catalog does not know (`mygame.localhost`, served locally) is sorted after a minute and then counts against games. It also checks that the Claude switches survive a page reload. It needs `~/gatekeeper-relay` with `npm install` done, Brave, and port 8787 free (or another in `RELAY_PORT`). The browser's permission prompt cannot be answered headless, so its test copy of the extension holds the all-sites permission from the start.
+
+```sh
+npm run e2e:qa
+```
+
+The QA findings that need a real browser: a watched site with access withheld is blocked and flagged, embedded players of a closed kind are blocked, every open tab of a kind goes to the gate when it closes, the private-window warnings show, and the welcome tab says nothing leaves the browser when Claude is off.
 
 ```sh
 npm run e2e:stale

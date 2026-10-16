@@ -6,7 +6,7 @@ export function ask(type, body = {}) {
   return new Promise((resolve, reject) =>
     chrome.runtime.sendMessage({ type, ...body }, (res) => {
       if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-      else if (res && res.error) reject(new Error(res.error));
+      else if (res && res.error && !("decision" in res)) reject(new Error(res.error));
       else resolve(res);
     }));
 }
@@ -45,4 +45,29 @@ export async function checkWorker() {
   document.querySelector("main").prepend(el("div", { class: "note", id: "stale" },
     `Gatekeeper was updated but is still running its old version, so changes here are not saved. Open ${where} and click the reload arrow on Gatekeeper.`));
   return false;
+}
+
+/** Where the browser keeps its extension settings, for instructions. */
+export function extensionsPage() {
+  const brave = navigator.userAgentData && navigator.userAgentData.brands.some((b) => /Brave/i.test(b.brand));
+  return brave ? "brave://extensions" : "chrome://extensions";
+}
+
+/**
+ * Lasting warnings: private windows the extension cannot reach, and watched sites whose access was
+ * withheld. `into` is the element they go before.
+ */
+export function warnings({ incognito, blind = [] }, into) {
+  const brave = extensionsPage().startsWith("brave");
+  const out = [];
+  if (incognito === false) {
+    out.push(el("div", { class: "note", id: "incognito-warning" },
+      `Private windows are not covered: any site opens there. To close that gap, open ${extensionsPage()}, click Details on Gatekeeper, and turn on "${brave ? "Allow in Private" : "Allow in Incognito"}".`));
+  }
+  if (blind.length) {
+    out.push(el("div", { class: "note", id: "blind-warning" },
+      `Gatekeeper's access to ${blind.slice(0, 3).join(", ")}${blind.length > 3 ? ` and ${blind.length - 3} more` : ""} was turned off, so it cannot count time there; those sites stay blocked until access is back. In ${extensionsPage()}, click Details on Gatekeeper and set Site access to "On specific sites".`));
+  }
+  for (const w of out) into.before(w);
+  return out.length;
 }

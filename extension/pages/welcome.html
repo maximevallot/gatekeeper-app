@@ -11,7 +11,7 @@
   <div class="brand">Gatekeeper</div>
   <div id="ask">
     <h1>Set your rules once, while your head is clear.</h1>
-    <p class="muted">Three questions, under two minutes. You can change them later; tightening applies at once, loosening the next morning.</p>
+    <p class="muted">A few questions, under two minutes. You can change them later; tightening applies at once, loosening the next morning.</p>
 
     <section>
       <h2><span class="step">1</span>What pulls you away?</h2>
@@ -40,13 +40,20 @@
         <span><b>Sort sites Gatekeeper doesn't know.</b> <span class="muted">Sent after a minute on such a site: its domain, page title and a random install number. Your browser will ask to let Gatekeeper see every site.</span></span></label>
     </section>
 
+    <section id="private-card" class="hidden">
+      <h2><span class="step">5</span>Private windows</h2>
+      <p id="private-text" class="muted"></p>
+      <button class="link" id="private-check" type="button">Check again</button>
+    </section>
+
     <button class="primary" id="start" disabled>Start Gatekeeper</button>
   </div>
 
   <div id="done" class="hidden">
     <h1>You're set.</h1>
     <p id="summary"></p>
-    <div class="ok">Gatekeeper only counts time while the tab is in front and you are there. Nothing leaves this browser.</div>
+    <div class="ok" id="done-privacy"></div>
+    <div class="note hidden" id="done-error"></div>
     <p><a class="primary" href="rules.html">See your rules</a></p>
   </div>
 </main>

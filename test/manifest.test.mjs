@@ -12,8 +12,8 @@ test("the extension may act only on the catalog's sites; anything else is asked 
   assert.ok(m.host_permissions.includes("*://*.agar.io/*"));
 });
 
-test("no permission beyond the four it needs, and nothing that reads pages", () => {
-  assert.deepEqual(m.permissions.sort(), ["alarms", "declarativeNetRequestWithHostAccess", "idle", "storage"]);
+test("no permission beyond the four it needs, and nothing that reads pages; plain declarativeNetRequest, so a block holds where site access was withheld (C2)", () => {
+  assert.deepEqual(m.permissions.sort(), ["alarms", "declarativeNetRequest", "idle", "storage"]);
   assert.equal(m.content_scripts, undefined);
   // Only the gate is reachable from web pages, from any page a link to a closed site starts on (a narrower
   // list ends such a click on Chrome's error page), and under a per-session address pages cannot probe for.

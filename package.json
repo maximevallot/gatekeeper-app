@@ -6,6 +6,7 @@
   "scripts": {
     "test": "TZ=America/New_York node --test 'test/*.test.mjs'",
     "e2e": "node test/e2e/run.mjs",
-    "e2e:stale": "node test/e2e/stale.mjs"
+    "e2e:stale": "node test/e2e/stale.mjs",
+    "e2e:qa": "node test/e2e/qa.mjs"
   }
 }

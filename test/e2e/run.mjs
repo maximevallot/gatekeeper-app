@@ -34,7 +34,8 @@ try {
   // The relay, as in its own smoke test.
   const mock = await startMock(KEY);
   const relay = spawn("npx", ["wrangler", "dev", "--port", RELAY_PORT, "--ip", "127.0.0.1", "--persist-to", join(work, "relay"),
-    "--show-interactive-dev-session=false", "--var", `ANTHROPIC_API_KEY:${KEY}`, "--var", `ANTHROPIC_BASE_URL:http://127.0.0.1:${mock.port}`],
+    "--show-interactive-dev-session=false", "--var", `ANTHROPIC_API_KEY:${KEY}`, "--var", `ANTHROPIC_BASE_URL:http://127.0.0.1:${mock.port}`,
+    "--var", "MAX_CALLS_PER_INSTALL:2"], // one gate message and one sort; the third call meets the daily limit
     { cwd: RELAY_DIR, env: { ...process.env, WRANGLER_SEND_METRICS: "false" }, stdio: ["ignore", "pipe", "pipe"] });
   children.push(relay);
   let relayLog = ""; relay.stdout.on("data", (d) => (relayLog += d)); relay.stderr.on("data", (d) => (relayLog += d));
@@ -63,15 +64,17 @@ try {
     { stdio: "ignore" });
   children.push(browser);
 
-  // The welcome tab: video closed all day (0 minutes), games 15 minutes, sorting on.
+  // The welcome tab: video and news closed all day (0 minutes), games 15 minutes, sorting on.
   const p = await connect((t) => t.type === "page" && t.url.endsWith("/pages/welcome.html"));
   await sleep(600);
-  await p.evaluate(`document.querySelector('.kind[data-kind=video]').click(); document.querySelector('.kind[data-kind=games]').click();`);
-  await p.evaluate(`(() => { const i = document.querySelector('#budgets input[data-kind=video]'); i.value = '0'; i.dispatchEvent(new Event('input'));
+  await p.evaluate(`document.querySelector('.kind[data-kind=video]').click(); document.querySelector('.kind[data-kind=games]').click(); document.querySelector('.kind[data-kind=news]').click();`);
+  await p.evaluate(`(() => { for (const k of ['video', 'news']) { const i = document.querySelector('#budgets input[data-kind=' + k + ']'); i.value = '0'; i.dispatchEvent(new Event('input')); }
     document.getElementById('goal').value = 'Finish problem set 4 by Thursday'; document.getElementById('sorting').click(); })()`);
   await sleep(500);
   await p.evaluate(`document.getElementById('start').click()`);
   await sleep(800);
+  const done = await p.evaluate(`document.getElementById('done-privacy').textContent`);
+  check("M3: the done panel says what leaves the browser, not that nothing does", /unknown sites' names and titles/.test(done) && !/Nothing leaves/.test(done), done);
   const sw = await connect((t) => t.type === "service_worker");
   const st = () => sw.evaluate(`chrome.storage.local.get('state').then(r => r.state)`);
   let s = await st();
@@ -95,8 +98,8 @@ try {
   await sleep(2500);
   check("the page reopens", (await p.evaluate("location.href")).startsWith("https://vimeo.com/"), await p.evaluate("location.href"));
   s = await st();
-  const left = Math.round((s.passes.video - Date.now()) / 60e3);
-  check("a 10-minute pass for video (the relay clamps 30 to 10)", left >= 9 && left <= 10, s.passes);
+  const left = s.passes["vimeo.com"] && s.passes["vimeo.com"].secondsLeft;
+  check("a 10-minute pass for vimeo.com only (the relay clamps 30 to 10)", left > 540 && left <= 600 && Object.keys(s.passes).length === 1, s.passes);
   await p.send("Page.navigate", { url: "https://vimeo.com/channels" });
   await sleep(2500);
   check("during the pass, vimeo stays open", (await p.evaluate("location.href")).startsWith("https://vimeo.com/"), await p.evaluate("location.href"));
@@ -125,6 +128,13 @@ try {
   s = await st();
   check("and now counts against games", (s.usage.seconds.games || 0) >= 2, s.usage.seconds);
   check("the relay was asked to sort it once", mock.requests.filter((r) => r.body.system?.includes("You sort websites")).length === 1);
+
+  // M2: the relay's daily limit shows as such, not as "can't reach".
+  await p.send("Page.navigate", { url: "https://www.nytimes.com/" }); await sleep(2500);
+  await p.evaluate(`document.getElementById('message').value = 'I need one article for class'; document.getElementById('form').requestSubmit();`);
+  await sleep(2500);
+  const limit = await p.evaluate(`[...document.querySelectorAll('#log .msg')].map(m => m.textContent).join(' | ')`);
+  check("M2: the daily limit says the gate has answered enough", /answered enough for today/.test(limit), limit);
 } catch (e) {
   console.log("FAIL", e.message);
   failures++;

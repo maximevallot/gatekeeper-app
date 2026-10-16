@@ -1,4 +1,4 @@
-# Chrome Web Store listing, version 0.1.0
+# Chrome Web Store listing, version 0.1.1
 
 Copy-paste text for the developer dashboard, matching what the extension does today. The longer drafts, with notes for a lawyer, are in `~/brain/outputs/gatekeeper-launch/`.
 
@@ -18,7 +18,9 @@ Two optional AI features, both off until you turn them on:
 - A gate that talks back. When a budget is used up, say what you need the site for. Claude may give you a few minutes for a real need, or say no.
 - Sorting sites Gatekeeper doesn't know. After a minute on a new site, Claude says which kind it is, so a new game counts as a game.
 
-Your data: your rules, budgets and time stay in your browser. Gatekeeper never reads page content. The AI features send only what they need (listed in the privacy policy), and only after you say yes. Nothing is sold or used for advertising.
+Private windows: turn on "Allow in Incognito" (Brave: "Allow in Private") for Gatekeeper, or any site opens there. The welcome tab shows how.
+
+Your data: your rules, budgets and history stay in your browser. Gatekeeper never reads page content. The AI features send only what they need, and only after you say yes: for a message at the gate, the site's name and kind, today's minutes and budget for that kind, your goal sentence and what you type; for sorting, a new site's name and page title. Nothing is sold or used for advertising.
 
 Privacy policy: https://gatekeeper-relay.mvallot22.workers.dev/privacy
 Questions: mvallot22@gmail.com
@@ -38,7 +40,7 @@ Limit the time you spend on distracting websites. You give each kind of site a d
 **Permission justifications**
 
 - `storage`: Keeps the user's rules, daily budgets, minutes used and pending rule changes in the browser.
-- `declarativeNetRequestWithHostAccess`: Redirects a site whose daily budget is used up to the extension's gate page before the page loads.
+- `declarativeNetRequest`: Closes a site whose daily budget is used up: redirects it to the extension's gate page before the page loads, and blocks it when it is embedded in another page or when the user has withheld the extension's access to that site, so turning off site access cannot reopen it.
 - `idle`: Counts time only while the user is active, so an idle tab does not use up the budget.
 - `alarms`: Resets budgets each day and applies a loosened rule the next morning.
 - Host permissions (the built-in list of social, video, game, news and shopping sites, and the extension's relay): Needed to close those sites when their budget is used up, and to reach the relay for the optional AI features.
