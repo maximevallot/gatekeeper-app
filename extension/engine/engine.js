@@ -381,14 +381,17 @@ export function enforcement(state, now, { withheld = [] } = {}) {
   const passed = (d) => { const p = (s.passes || {})[d]; return p && p.secondsLeft > 0; };
   const blind = watchedDomains(s).filter((d) => hidden.has(d) && !passed(d));
   // Judged videos: one a rule lets through stays reachable when its site is closed; one a rule closes is
-  // stopped before it loads. Videos opened inside YouTube are caught by the tick instead.
+  // stopped before it loads. Videos opened inside YouTube are caught by the tick instead. With YouTube's
+  // access withheld the tick cannot see the page, so a video whose rule counts time is not let through:
+  // its minutes could not be counted. A free video can be, since nothing is counted there.
+  const youtubeBlind = blind.some((d) => d === "youtube.com" || d === "youtu.be");
   const allowVideos = [], closeVideos = [];
   const recent = Object.entries(s.judged || {}).sort((a, b) => b[1].at - a[1].at);
   for (const [key, j] of recent) {
     if (!j.rule) continue;
     const d = decide(s, { url: "https://www.youtube.com/watch?v=" + key.slice(3), now });
     if (!d.video) continue;
-    if (d.verdict === "allow") allowVideos.push(key);
+    if (d.verdict === "allow") { if (!(youtubeBlind && d.watched)) allowVideos.push(key); }
     else closeVideos.push(key);
   }
   return {

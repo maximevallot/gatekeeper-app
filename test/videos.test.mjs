@@ -235,3 +235,19 @@ test("consent is kept with its version; a yes from before versions counts as ver
   assert.deepEqual(st.chat, { on: false, outdated: true });
   assert.deepEqual(st.talk, { on: true, outdated: false });
 });
+
+test("C2: with YouTube's access withheld, a video whose rule counts time is not let through; a free one is", () => {
+  let s = completeSetup(initialState(), { kinds: {}, goal: "" }, MON_2PM).state;
+  s = proposeRules(s, { ...s.rules, videos: [{ id: "v1", site: "youtube.com", about: "educational", minutes: 30 }] }, MON_2PM).state;
+  assert.equal(s.rules.videos.length, 1); // Video is not watched, so the rule applies now
+  s = proposeRules(s, { ...s.rules, kinds: { video: { minutes: 0 } } }, MON_2PM).state;
+  s = recordJudgment(s, "yt:abcdefghijk", "v1", "words", MON_2PM);
+  const withheld = { withheld: ["youtube.com", "youtu.be"] };
+  let e = enforcement(s, MON_2PM, withheld);
+  assert.deepEqual(e.blind, ["youtube.com", "youtu.be"]);
+  assert.deepEqual(e.allowVideos, []);
+  assert.deepEqual(enforcement(s, MON_2PM).allowVideos, ["yt:abcdefghijk"]); // with access, it is let through
+  s = { ...s, rules: { ...s.rules, videos: s.rules.videos.map((v) => ({ ...v, minutes: null })) } };
+  e = enforcement(s, MON_2PM, withheld);
+  assert.deepEqual(e.allowVideos, ["yt:abcdefghijk"]);
+});
