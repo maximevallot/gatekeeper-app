@@ -92,7 +92,8 @@
     "*://*.hm.com/*",
     "*://*.uniqlo.com/*",
     "*://*.wayfair.com/*",
-    "*://*.zalando.com/*"
+    "*://*.zalando.com/*",
+    "http://localhost/*"
   ],
   "optional_host_permissions": [
     "*://*/*"

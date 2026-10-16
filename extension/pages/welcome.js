@@ -22,6 +22,7 @@ function render() {
   const any = picked.size > 0;
   $("budgets-card").classList.toggle("hidden", !any);
   $("goal-card").classList.toggle("hidden", !any);
+  $("claude-card").classList.toggle("hidden", !any);
   $("start").disabled = !any;
   $("budgets").replaceChildren(...KIND_ORDER.filter((k) => picked.has(k)).map((kind) => {
     const input = el("input", { type: "number", min: "0", max: "600", step: "5", value: String(picked.get(kind)),
@@ -35,7 +36,14 @@ $("start").addEventListener("click", async () => {
   $("start").disabled = true;
   const kinds = Object.fromEntries(picked);
   await ask("setup", { kinds, goal: $("goal").value });
+  await ask("consent", { talk: $("talk").checked, sorting: $("sorting").checked });
   $("summary").textContent = Object.entries(kinds).map(([k, m]) => `${label(k)}: ${minutesText(m)}`).join(". ") + ".";
   $("ask").classList.add("hidden");
   $("done").classList.remove("hidden");
+});
+
+$("sorting").addEventListener("change", () => {
+  if (!$("sorting").checked) return;
+  // The browser asks; the request has to start inside the click.
+  chrome.permissions.request({ origins: ["*://*/*"] }).then((granted) => { $("sorting").checked = granted; });
 });

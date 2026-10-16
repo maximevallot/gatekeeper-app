@@ -96,3 +96,34 @@ $("save").addEventListener("click", async () => {
 });
 
 load();
+
+// ---------- Claude: two switches, each a yes to sending something ----------
+
+const ALL_SITES = { origins: ["*://*/*"] };
+
+async function loadSwitches() {
+  const { state } = await ask("state");
+  $("talk").checked = !!state.talk;
+  $("sorting").checked = !!state.sorting;
+}
+
+$("talk").addEventListener("change", async () => {
+  await ask("consent", { talk: $("talk").checked });
+  flash($("talk").checked ? "The gate can talk back." : "The gate no longer sends anything.");
+});
+
+$("sorting").addEventListener("change", () => {
+  if ($("sorting").checked) {
+    // The browser asks the user; the request has to start inside the click.
+    chrome.permissions.request(ALL_SITES).then(async (granted) => {
+      const r = await ask("consent", { sorting: granted });
+      $("sorting").checked = r.sorting;
+      flash(r.sorting ? "Sites Gatekeeper doesn't know will be sorted after a minute." : "Without that permission Gatekeeper cannot see other sites, so sorting stays off.");
+    });
+  } else {
+    ask("consent", { sorting: false }).then(() => chrome.permissions.remove(ALL_SITES));
+    flash("Sorting is off. Sites already sorted keep their kind.");
+  }
+});
+
+loadSwitches();

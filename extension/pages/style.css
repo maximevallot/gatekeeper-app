@@ -46,3 +46,13 @@ button.link { font: inherit; border: 0; background: none; color: var(--accent); 
 .goal .muted { margin-bottom: 2px; }
 .goal p { font-size: 19px; margin: 0; }
 ul.changes { margin: 6px 0 0; padding-left: 20px; }
+.log { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.msg { padding: 9px 13px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); max-width: 85%; }
+.msg.me { align-self: flex-end; background: var(--soft); border-color: transparent; }
+form.ask { display: flex; gap: 8px; align-items: stretch; }
+form.ask textarea { flex: 1; resize: none; font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; padding: 9px 11px; }
+#consent .primary { margin-right: 14px; }
+.switch { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
+.switch:first-of-type { border-top: 0; }
+.switch input { margin-top: 5px; }

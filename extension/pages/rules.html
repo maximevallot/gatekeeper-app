@@ -37,6 +37,15 @@
     <input type="text" id="goal" maxlength="300" autocomplete="off">
   </section>
 
+  <section>
+    <h2>Claude</h2>
+    <p class="muted">Both are off until you turn them on. What is sent goes to Gatekeeper's relay, which asks Anthropic's Claude and keeps none of it.</p>
+    <label class="switch"><input type="checkbox" id="talk">
+      <span><b>The gate can talk back.</b> <span class="muted">At a closed site you can say what you need it for, and Claude may open it for a few minutes. Sent: the site's domain and kind, today's minutes and budget, your goal sentence, what you type, and a random install number.</span></span></label>
+    <label class="switch"><input type="checkbox" id="sorting">
+      <span><b>Sort sites Gatekeeper doesn't know.</b> <span class="muted">After a minute on a site not in its list, Claude says which kind it is, so a new game counts as a game. Sent: the site's domain, its page title, and a random install number. Your browser will ask to let Gatekeeper see every site.</span></span></label>
+  </section>
+
   <button class="primary" id="save">Save</button>
 </main>
 <script type="module" src="rules.js"></script>

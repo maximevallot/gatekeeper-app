@@ -31,6 +31,15 @@
       <input type="text" id="goal" maxlength="300" placeholder="Finish my problem sets before Friday" autocomplete="off">
     </section>
 
+    <section id="claude-card" class="hidden">
+      <h2><span class="step">4</span>Let Claude help? <span class="muted">Optional</span></h2>
+      <p class="muted">Off unless you tick it. What is sent goes to Gatekeeper's relay, which asks Anthropic's Claude and keeps none of it.</p>
+      <label class="switch"><input type="checkbox" id="talk">
+        <span><b>The gate can talk back.</b> <span class="muted">Say what you need a closed site for, and Claude may open it for a few minutes. Sent: the site, today's minutes and budget, your goal, what you type, and a random install number.</span></span></label>
+      <label class="switch"><input type="checkbox" id="sorting">
+        <span><b>Sort sites Gatekeeper doesn't know.</b> <span class="muted">Sent after a minute on such a site: its domain, page title and a random install number. Your browser will ask to let Gatekeeper see every site.</span></span></label>
+    </section>
+
     <button class="primary" id="start" disabled>Start Gatekeeper</button>
   </div>
 

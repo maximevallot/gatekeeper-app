@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { catalogPatterns } from "../scripts/sync-manifest.mjs";
+import { catalogPatterns, relayPattern } from "../scripts/sync-manifest.mjs";
 
 const m = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8"));
 
 test("the extension may act only on the catalog's sites; anything else is asked for, one site at a time", () => {
-  assert.deepEqual(m.host_permissions, catalogPatterns(), "run node scripts/sync-manifest.mjs");
+  assert.deepEqual(m.host_permissions, [...catalogPatterns(), relayPattern()], "run node scripts/sync-manifest.mjs");
+  assert.equal(relayPattern(), "http://localhost/*");
   assert.deepEqual(m.optional_host_permissions, ["*://*/*"]);
   assert.ok(m.host_permissions.includes("*://*.agar.io/*"));
 });

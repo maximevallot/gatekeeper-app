@@ -1,13 +1,15 @@
 // The hands, in the browser. They report the page in front and enforce what the engine decides; they
 // decide nothing. The state lives in chrome.storage.local, and only this worker writes it, one change
-// at a time. Milestone 1 makes no network calls.
+// at a time. The only network calls go to the relay (hands/relay.js), and only after the user said yes.
 
 import * as engine from "../engine/engine.js";
 import { buildRules } from "./blocker.js";
+import { callRelay } from "./relay.js";
 
 const TICK_MS = 2000;
 const IDLE_SECONDS = 60; // no keyboard or mouse for a minute, and nothing playing: you are away
 const GATE = chrome.runtime.getURL("pages/gate.html");
+const ALL_SITES = { origins: ["*://*/*"] }; // granted only when the user turns on sorting
 
 let state = null;
 let queue = Promise.resolve();
@@ -15,7 +17,13 @@ let blocking = null; // the closed domains last written into the redirect rules
 let lastTick = Date.now();
 
 async function load() {
-  if (!state) state = (await chrome.storage.local.get("state")).state || engine.initialState();
+  if (!state) {
+    state = engine.upgrade((await chrome.storage.local.get("state")).state);
+    if (!state.installId) {
+      state = { ...state, installId: crypto.randomUUID() };
+      await chrome.storage.local.set({ state });
+    }
+  }
   return state;
 }
 
@@ -76,6 +84,7 @@ async function tick() {
   // A video playing counts as being there, even with hands off the keyboard.
   const active = (await chrome.idle.queryState(IDLE_SECONDS)) === "active" || !!tab.audible;
   const out = await update((s) => engine.tick(s, { url, title: tab.title || "", focused, active, seconds, now }));
+  if (out.sort) sortSite(out.sort, tab.title || "");
   const d = out.decision;
   if (d.verdict !== "allow") {
     await chrome.tabs.update(tab.id, { url: gateUrl(url) });
@@ -83,6 +92,14 @@ async function tick() {
   } else {
     badge(d.watched ? String(d.leftMinutes) : "");
   }
+}
+
+/** Ask the relay which kind an unknown site is, and remember the answer on this device. */
+async function sortSite(domain, title) {
+  const s = await load();
+  const r = await callRelay("/sort", { installId: s.installId, domain, title: title.slice(0, 300) });
+  const kind = r.ok && typeof r.data.kind === "string" ? r.data.kind : null;
+  await update((st) => ({ state: kind ? engine.recordSort(st, domain, kind) : engine.sortFailed(st, domain, Date.now()) }));
 }
 
 function badge(text) {
@@ -99,7 +116,29 @@ const handlers = {
   },
   async decide({ url }) {
     await update((s) => ({ state: engine.rollover(s, Date.now()) }));
-    return { decision: engine.decide(state, { url, now: Date.now() }), goal: state.goal };
+    const decision = engine.decide(state, { url, now: Date.now() });
+    const cooldownUntil = (state.cooldowns || {})[decision.kind] || 0;
+    return { decision, goal: state.goal, talk: state.talk, cooldownUntil: cooldownUntil > Date.now() ? cooldownUntil : 0 };
+  },
+  // One message at the gate. The relay is asked only if the engine says there is something to ask.
+  async talk({ url, message, lastTurn }) {
+    const req = engine.gateRequest(await load(), { url, message, now: Date.now() });
+    if (req.refused) return { decision: "refused", reason: req.refused, until: req.until };
+    const r = await callRelay("/gate", req.payload);
+    if (!r.ok) return { decision: "error", error: r.error, scope: r.scope };
+    const out = await update((s) => engine.applyGateAnswer(s, { kind: req.payload.kind, answer: r.data, lastTurn: !!lastTurn, now: Date.now() }));
+    return out.result;
+  },
+  // The pages ask for the all-sites permission themselves, inside the click; this records the answer.
+  async consent({ talk, sorting }) {
+    if (sorting && !(await chrome.permissions.contains(ALL_SITES))) sorting = false;
+    await update((s) => {
+      let n = s;
+      if (talk !== undefined) n = engine.setTalk(n, talk);
+      if (sorting !== undefined) n = engine.setSorting(n, sorting);
+      return { state: n };
+    });
+    return { talk: state.talk, sorting: state.sorting };
   },
   async setup({ kinds, goal }) {
     const out = await update((s) => engine.completeSetup(s, { kinds, goal }, Date.now()));
@@ -127,6 +166,11 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
 chrome.action.onClicked.addListener(async () => {
   const s = await load();
   chrome.tabs.create({ url: chrome.runtime.getURL(s.setupDone ? "pages/rules.html" : "pages/welcome.html") });
+});
+
+// Sorting needs to see every site; if the permission is taken away, sorting stops.
+chrome.permissions.onRemoved.addListener(async () => {
+  if (!(await chrome.permissions.contains(ALL_SITES))) update((s) => ({ state: engine.setSorting(s, false) }));
 });
 
 chrome.tabs.onActivated.addListener(tick);
