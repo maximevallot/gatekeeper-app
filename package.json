@@ -1,0 +1,9 @@
+{
+  "name": "gatekeeper-app",
+  "private": true,
+  "type": "module",
+  "description": "Gatekeeper, the product: a browser extension that gives each kind of distracting site a daily budget.",
+  "scripts": {
+    "test": "TZ=America/New_York node --test 'test/*.test.mjs'"
+  }
+}

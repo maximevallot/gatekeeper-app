@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Closed for today</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="gate">
+  <div class="brand">Gatekeeper</div>
+  <div id="closed" class="hidden">
+    <div class="muted" id="site"></div>
+    <h1 id="headline"></h1>
+    <div class="meter"><div id="bar" style="width:100%"></div></div>
+    <p class="muted" id="used"></p>
+    <div class="goal" id="goal-box">
+      <div class="muted">What you said you're working toward</div>
+      <p id="goal"></p>
+    </div>
+    <p class="muted"><a href="rules.html" id="rules-link">Your rules</a>. A looser rule takes effect the next morning.</p>
+  </div>
+</main>
+<script type="module" src="gate.js"></script>
+</body>
+</html>

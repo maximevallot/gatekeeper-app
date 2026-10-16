@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your rules · Gatekeeper</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <div class="brand">Gatekeeper</div>
+  <h1>Your rules</h1>
+  <p class="muted">Tightening a rule applies now. Loosening one applies the next morning, so the evening version of you can ask, and the morning version decides.</p>
+
+  <div id="pending" class="note hidden"></div>
+  <div id="result" class="ok hidden"></div>
+
+  <section>
+    <h2>Kinds of sites</h2>
+    <p class="muted">A daily budget for each kind you watch. 0 closes it all day.</p>
+    <div id="kinds"></div>
+  </section>
+
+  <section>
+    <h2>Your own sites</h2>
+    <p class="muted">A site Gatekeeper does not know yet, counted against one of your kinds.</p>
+    <div id="sites"></div>
+    <div class="row">
+      <input type="text" id="new-site" placeholder="example.com" autocomplete="off" style="flex:1">
+      <select id="new-kind"></select>
+      <button class="link" id="add-site" type="button">Add</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>What you're working toward</h2>
+    <input type="text" id="goal" maxlength="300" autocomplete="off">
+  </section>
+
+  <button class="primary" id="save">Save</button>
+</main>
+<script type="module" src="rules.js"></script>
+</body>
+</html>

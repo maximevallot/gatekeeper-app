@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Welcome to Gatekeeper</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <div class="brand">Gatekeeper</div>
+  <div id="ask">
+    <h1>Set your rules once, while your head is clear.</h1>
+    <p class="muted">Three questions, under two minutes. You can change them later; tightening applies at once, loosening the next morning.</p>
+
+    <section>
+      <h2><span class="step">1</span>What pulls you away?</h2>
+      <p class="muted">Tap every kind that applies. A site you have never set up still counts once it is in a kind.</p>
+      <div class="kinds" id="kinds"></div>
+    </section>
+
+    <section id="budgets-card" class="hidden">
+      <h2><span class="step">2</span>How many minutes a day for each?</h2>
+      <p class="muted">When they are used up, that kind of site closes until tomorrow morning. 0 closes it all day.</p>
+      <div id="budgets"></div>
+    </section>
+
+    <section id="goal-card" class="hidden">
+      <h2><span class="step">3</span>What are you working toward?</h2>
+      <p class="muted">One sentence. The gate shows it back to you when a site is closed.</p>
+      <input type="text" id="goal" maxlength="300" placeholder="Finish my problem sets before Friday" autocomplete="off">
+    </section>
+
+    <button class="primary" id="start" disabled>Start Gatekeeper</button>
+  </div>
+
+  <div id="done" class="hidden">
+    <h1>You're set.</h1>
+    <p id="summary"></p>
+    <div class="ok">Gatekeeper only counts time while the tab is in front and you are there. Nothing leaves this browser.</div>
+    <p><a class="primary" href="rules.html">See your rules</a></p>
+  </div>
+</main>
+<script type="module" src="welcome.js"></script>
+</body>
+</html>
