@@ -5,6 +5,7 @@
   "description": "Gatekeeper, the product: a browser extension that gives each kind of distracting site a daily budget.",
   "scripts": {
     "test": "TZ=America/New_York node --test 'test/*.test.mjs'",
-    "e2e": "node test/e2e/run.mjs"
+    "e2e": "node test/e2e/run.mjs",
+    "e2e:stale": "node test/e2e/stale.mjs"
   }
 }

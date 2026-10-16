@@ -3,7 +3,7 @@
 //   1. a message at the gate gets a pass, and the closed site reopens for those minutes;
 //   2. a site not in the catalog is sorted after a minute in front, and then counts against its kind.
 // Needs ~/gatekeeper-relay with `npm install` done (or GATEKEEPER_RELAY_DIR), Brave (or BROWSER), and port
-// 8787 free. The browser's permission prompt cannot be answered headless, so the test copy of the extension
+// 8787 free (or another port in RELAY_PORT). The browser's permission prompt cannot be answered headless, so the test copy of the extension
 // holds the all-sites permission from the start; everything else is the extension as it ships.
 import { spawn } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,6 +17,7 @@ import { connect, sleep } from "./cdp.mjs";
 const RELAY_DIR = process.env.GATEKEEPER_RELAY_DIR || join(homedir(), "gatekeeper-relay");
 const BROWSER = process.env.BROWSER || "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
 const KEY = "sk-ant-e2e-not-a-real-key";
+const RELAY_PORT = process.env.RELAY_PORT || "8787";
 const work = mkdtempSync(join(tmpdir(), "gatekeeper-e2e-"));
 const children = [];
 let failures = 0;
@@ -32,13 +33,13 @@ process.on("exit", cleanup);
 try {
   // The relay, as in its own smoke test.
   const mock = await startMock(KEY);
-  const relay = spawn("npx", ["wrangler", "dev", "--port", "8787", "--ip", "127.0.0.1", "--persist-to", join(work, "relay"),
+  const relay = spawn("npx", ["wrangler", "dev", "--port", RELAY_PORT, "--ip", "127.0.0.1", "--persist-to", join(work, "relay"),
     "--show-interactive-dev-session=false", "--var", `ANTHROPIC_API_KEY:${KEY}`, "--var", `ANTHROPIC_BASE_URL:http://127.0.0.1:${mock.port}`],
     { cwd: RELAY_DIR, env: { ...process.env, WRANGLER_SEND_METRICS: "false" }, stdio: ["ignore", "pipe", "pipe"] });
   children.push(relay);
   let relayLog = ""; relay.stdout.on("data", (d) => (relayLog += d)); relay.stderr.on("data", (d) => (relayLog += d));
   for (let i = 0; ; i++) {
-    try { await fetch("http://127.0.0.1:8787/"); break; } catch { if (i > 200) throw new Error("relay did not start\n" + relayLog); await sleep(300); }
+    try { await fetch(`http://127.0.0.1:${RELAY_PORT}/`); break; } catch { if (i > 200) throw new Error("relay did not start\n" + relayLog); await sleep(300); }
   }
 
   // A game the catalog does not know, served on this Mac.
@@ -52,7 +53,7 @@ try {
   const ext = join(work, "extension");
   cpSync(fileURLToPath(new URL("../../extension", import.meta.url)), ext, { recursive: true });
   const config = join(ext, "config.js");
-  writeFileSync(config, readFileSync(config, "utf8").replace(/export const RELAY_URL = ".*";/, 'export const RELAY_URL = "http://localhost:8787";'));
+  writeFileSync(config, readFileSync(config, "utf8").replace(/export const RELAY_URL = ".*";/, `export const RELAY_URL = "http://localhost:${RELAY_PORT}";`));
   const m = JSON.parse(readFileSync(join(ext, "manifest.json"), "utf8"));
   m.host_permissions.push("*://*/*", "http://localhost/*");
   writeFileSync(join(ext, "manifest.json"), JSON.stringify(m));
@@ -101,6 +102,19 @@ try {
   check("during the pass, vimeo stays open", (await p.evaluate("location.href")).startsWith("https://vimeo.com/"), await p.evaluate("location.href"));
   const sent = mock.requests.filter((r) => !r.body.system?.includes("You sort websites")).at(-1);
   check("Claude saw the site and the message, not the page's address", /vimeo\.com/.test(sent.body.messages[0].content) && !/channels/.test(sent.body.messages[0].content), sent.body.messages[0].content.slice(0, 300));
+
+  // The switches show what is saved, and survive a reload (the bug of 2026-10-16 was a page that looked
+  // ticked while nothing was saved).
+  const rulesUrl = (await sw.evaluate(`chrome.runtime.getURL("pages/rules.html")`));
+  const switches = () => p.evaluate(`[document.getElementById('talk').checked, document.getElementById('sorting').checked, !!document.getElementById('stale')]`);
+  await p.send("Page.navigate", { url: rulesUrl }); await sleep(1000);
+  check("the rules page shows the yes given at the gate, and sorting on", JSON.stringify(await switches()) === "[true,true,false]", await switches());
+  await p.evaluate(`document.getElementById('talk').click()`); await sleep(600);
+  await p.send("Page.reload"); await sleep(1000);
+  check("turning talk off survives a reload", JSON.stringify(await switches()) === "[false,true,false]", await switches());
+  await p.evaluate(`document.getElementById('talk').click()`); await sleep(600);
+  await p.send("Page.reload"); await sleep(1000);
+  check("and turning it back on does too", JSON.stringify(await switches()) === "[true,true,false]" && (await st()).talk === true, await switches());
 
   // 2. Sorting: a minute on the unknown game.
   await p.send("Page.navigate", { url: GAME });

@@ -1,7 +1,7 @@
 // The gate. It says what is closed, how much was used, when it reopens, and the user's own sentence about
 // what they are working toward. One box takes a real need to Claude through the relay: allow opens the
 // site for a few minutes, ask allows one follow-up, and no, or any error, keeps it shut.
-import { ask, when, el } from "./common.js";
+import { ask, when, el, checkWorker } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 const url = location.hash.slice(1); // the page that was stopped, exactly as it was asked for
@@ -68,7 +68,12 @@ $("form").addEventListener("submit", (e) => {
 });
 
 $("consent-yes").addEventListener("click", async () => {
-  await ask("consent", { talk: true });
+  const r = await ask("consent", { talk: true }).catch(() => null);
+  if (!r || !r.talk) {
+    $("consent").classList.add("hidden");
+    shut("Can't reach the gate right now, so it stays shut.");
+    return;
+  }
   talk.on = true;
   $("consent").classList.add("hidden");
   $("form").classList.remove("hidden");
@@ -109,4 +114,5 @@ async function send(text) {
   }
 }
 
+checkWorker();
 show();

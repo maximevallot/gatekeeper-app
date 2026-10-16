@@ -5,6 +5,7 @@
 import * as engine from "../engine/engine.js";
 import { buildRules } from "./blocker.js";
 import { callRelay } from "./relay.js";
+import { PROTOCOL } from "../protocol.js";
 
 const TICK_MS = 2000;
 const IDLE_SECONDS = 60; // no keyboard or mouse for a minute, and nothing playing: you are away
@@ -110,6 +111,9 @@ function badge(text) {
 // ---------- the pages ----------
 
 const handlers = {
+  async hello() {
+    return { protocol: PROTOCOL };
+  },
   async state() {
     const s = engine.rollover(await load(), Date.now());
     return { state: s, now: Date.now(), closed: engine.closedKinds(s, Date.now()) };

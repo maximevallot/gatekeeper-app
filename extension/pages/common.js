@@ -1,5 +1,7 @@
 // Shared by the pages: talking to the hands, and the words for times and minutes.
 
+import { PROTOCOL } from "../protocol.js";
+
 export function ask(type, body = {}) {
   return new Promise((resolve, reject) =>
     chrome.runtime.sendMessage({ type, ...body }, (res) => {
@@ -29,4 +31,18 @@ export function el(tag, attrs = {}, ...children) {
   }
   for (const c of children) e.append(c);
   return e;
+}
+
+/**
+ * Make sure the background worker speaks this page's protocol. If it does not (an old worker still running
+ * beside newer pages), say so at the top of the page and return false.
+ */
+export async function checkWorker() {
+  let r = null;
+  try { r = await Promise.race([ask("hello"), new Promise((res) => setTimeout(() => res(null), 3000))]); } catch {}
+  if (r && r.protocol === PROTOCOL) return true;
+  const where = navigator.userAgentData && navigator.userAgentData.brands.some((b) => /Brave/i.test(b.brand)) ? "brave://extensions" : "chrome://extensions";
+  document.querySelector("main").prepend(el("div", { class: "note", id: "stale" },
+    `Gatekeeper was updated but is still running its old version, so changes here are not saved. Open ${where} and click the reload arrow on Gatekeeper.`));
+  return false;
 }

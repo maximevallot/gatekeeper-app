@@ -1,6 +1,6 @@
 import { KINDS, KIND_ORDER } from "../engine/catalog.js";
 import { DEFAULT_MINUTES, minutesText, label } from "../engine/engine.js";
-import { ask, el } from "./common.js";
+import { ask, el, checkWorker } from "./common.js";
 
 const picked = new Map(); // kind -> minutes
 const $ = (id) => document.getElementById(id);
@@ -36,7 +36,7 @@ $("start").addEventListener("click", async () => {
   $("start").disabled = true;
   const kinds = Object.fromEntries(picked);
   await ask("setup", { kinds, goal: $("goal").value });
-  await ask("consent", { talk: $("talk").checked, sorting: $("sorting").checked });
+  await ask("consent", { talk: $("talk").checked, sorting: $("sorting").checked }).catch(() => {});
   $("summary").textContent = Object.entries(kinds).map(([k, m]) => `${label(k)}: ${minutesText(m)}`).join(". ") + ".";
   $("ask").classList.add("hidden");
   $("done").classList.remove("hidden");
@@ -47,3 +47,5 @@ $("sorting").addEventListener("change", () => {
   // The browser asks; the request has to start inside the click.
   chrome.permissions.request({ origins: ["*://*/*"] }).then((granted) => { $("sorting").checked = granted; });
 });
+
+checkWorker();

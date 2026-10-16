@@ -1,6 +1,6 @@
 import { KINDS, KIND_ORDER } from "../engine/catalog.js";
 import { DEFAULT_MINUTES, label } from "../engine/engine.js";
-import { ask, el, when } from "./common.js";
+import { ask, el, when, checkWorker } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 let draft = null; // the rules being edited: { kinds, sites, dayStart }
@@ -107,23 +107,40 @@ async function loadSwitches() {
   $("sorting").checked = !!state.sorting;
 }
 
+// A switch shows what is saved, never just what was clicked.
+async function saveConsent(change) {
+  try {
+    const r = await ask("consent", change);
+    $("talk").checked = !!r.talk;
+    $("sorting").checked = !!r.sorting;
+    return r;
+  } catch {
+    await loadSwitches().catch(() => { $("talk").checked = $("sorting").checked = false; });
+    flash("That change was not saved: Gatekeeper's background did not answer.");
+    return null;
+  }
+}
+
 $("talk").addEventListener("change", async () => {
-  await ask("consent", { talk: $("talk").checked });
-  flash($("talk").checked ? "The gate can talk back." : "The gate no longer sends anything.");
+  const r = await saveConsent({ talk: $("talk").checked });
+  if (r) flash(r.talk ? "The gate can talk back." : "The gate no longer sends anything.");
 });
 
 $("sorting").addEventListener("change", () => {
   if ($("sorting").checked) {
     // The browser asks the user; the request has to start inside the click.
     chrome.permissions.request(ALL_SITES).then(async (granted) => {
-      const r = await ask("consent", { sorting: granted });
-      $("sorting").checked = r.sorting;
-      flash(r.sorting ? "Sites Gatekeeper doesn't know will be sorted after a minute." : "Without that permission Gatekeeper cannot see other sites, so sorting stays off.");
+      const r = await saveConsent({ sorting: granted });
+      if (r) flash(r.sorting ? "Sites Gatekeeper doesn't know will be sorted after a minute." : "Without that permission Gatekeeper cannot see other sites, so sorting stays off.");
     });
   } else {
-    ask("consent", { sorting: false }).then(() => chrome.permissions.remove(ALL_SITES));
-    flash("Sorting is off. Sites already sorted keep their kind.");
+    saveConsent({ sorting: false }).then((r) => {
+      if (!r) return;
+      chrome.permissions.remove(ALL_SITES);
+      flash("Sorting is off. Sites already sorted keep their kind.");
+    });
   }
 });
 
+checkWorker();
 loadSwitches();

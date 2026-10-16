@@ -55,7 +55,13 @@ npm test
 npm run e2e
 ```
 
-The whole extension against the real relay Worker under `wrangler dev`, with a fake Anthropic API and no key, in a throwaway headless Brave profile. A closed site's gate gets a pass and reopens the site; a game the catalog does not know (`mygame.localhost`, served locally) is sorted after a minute and then counts against games. It needs `~/gatekeeper-relay` with `npm install` done, Brave, and port 8787 free. The browser's permission prompt cannot be answered headless, so its test copy of the extension holds the all-sites permission from the start.
+The whole extension against the real relay Worker under `wrangler dev`, with a fake Anthropic API and no key, in a throwaway headless Brave profile. A closed site's gate gets a pass and reopens the site; a game the catalog does not know (`mygame.localhost`, served locally) is sorted after a minute and then counts against games. It also checks that the Claude switches survive a page reload. It needs `~/gatekeeper-relay` with `npm install` done, Brave, and port 8787 free (or another in `RELAY_PORT`). The browser's permission prompt cannot be answered headless, so its test copy of the extension holds the all-sites permission from the start.
+
+```sh
+npm run e2e:stale
+```
+
+Today's pages beside milestone 1's background worker, the state Brave was in on 2026-10-16 when the unpacked extension had not been reloaded: the switches looked ticked and nothing was saved. Every page now asks the worker for its protocol (`extension/protocol.js`) and, if it does not match, says to reload Gatekeeper; a switch shows only what was saved. Bump `PROTOCOL` whenever a page starts sending a message an older worker would not know.
 
 ## Next
 
