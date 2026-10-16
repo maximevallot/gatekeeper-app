@@ -47,11 +47,14 @@ try {
   children.push({ kill: () => game.close() });
   const GAME = `http://mygame.localhost:${game.address().port}/play`;
 
-  // The extension as it ships, except that the all-sites permission is granted up front.
+  // The extension as it ships, except that the all-sites permission is granted up front and it talks to the
+  // local relay with the fake Anthropic API, never the deployed one.
   const ext = join(work, "extension");
   cpSync(fileURLToPath(new URL("../../extension", import.meta.url)), ext, { recursive: true });
+  const config = join(ext, "config.js");
+  writeFileSync(config, readFileSync(config, "utf8").replace(/export const RELAY_URL = ".*";/, 'export const RELAY_URL = "http://localhost:8787";'));
   const m = JSON.parse(readFileSync(join(ext, "manifest.json"), "utf8"));
-  m.host_permissions.push("*://*/*");
+  m.host_permissions.push("*://*/*", "http://localhost/*");
   writeFileSync(join(ext, "manifest.json"), JSON.stringify(m));
 
   const browser = spawn(BROWSER, ["--headless=new", `--user-data-dir=${join(work, "profile")}`, "--no-first-run", "--no-default-browser-check",

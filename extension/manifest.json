@@ -93,7 +93,7 @@
     "*://*.uniqlo.com/*",
     "*://*.wayfair.com/*",
     "*://*.zalando.com/*",
-    "http://localhost/*"
+    "https://gatekeeper-relay.mvallot22.workers.dev/*"
   ],
   "optional_host_permissions": [
     "*://*/*"
