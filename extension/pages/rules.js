@@ -208,7 +208,15 @@ function renderExam() {
   $("exam-title").textContent = `Exam mode until ${when(s.rules.exam.until)}`;
   $("exam-goal").textContent = s.rules.exam.goal || "Every kind of site is closed until then.";
   $("exam-hint").textContent = `To end it now, type: ${EXAM_END_SENTENCE}`;
+  // The Mac app's "End exam mode early" opens this page at #exam.
+  if (location.hash === "#exam" && !renderExam.opened) {
+    renderExam.opened = true;
+    $("exam-form").classList.remove("hidden");
+    $("exam-sentence").focus();
+  }
 }
+// Also when this page is already open and the Mac app sends it to #exam.
+window.addEventListener("hashchange", () => { renderExam.opened = false; if (got) renderExam(); });
 $("exam-end-open").addEventListener("click", () => { $("exam-form").classList.toggle("hidden"); $("exam-sentence").focus(); });
 $("exam-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -225,9 +233,9 @@ async function renderMac() {
   const m = await ask("mac").catch(() => ({ permitted: false }));
   $("mac").checked = !!m.permitted;
   $("mac-sub").textContent = !m.permitted
-    ? "Off. With Gatekeeper for Mac, shares today's minutes and exam mode, on this Mac only."
+    ? "Off. With Gatekeeper for Mac on, your goal, each kind's minutes today and exam mode go to a file on this Mac that apps you run can read. Nothing goes to a server."
     : m.connected
-      ? "Connected. Shares your goal, each kind's minutes today and exam mode with Gatekeeper for Mac. It stays on this Mac."
+      ? "Connected. Your goal, each kind's minutes today and exam mode go to Gatekeeper for Mac, in a file on this Mac that apps you run can read. Nothing goes to a server."
       : m.error === "reload_needed"
         ? "Reload Gatekeeper once (in your browser's extensions page) to connect."
         : "Gatekeeper for Mac isn't answering. Is it installed and open?";

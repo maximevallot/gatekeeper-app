@@ -98,4 +98,6 @@ Without the Mac app link, no permission is added, and the update shows no new wa
 - Starts with a week of just watching: Gatekeeper counts your time and blocks nothing, then shows your week and suggests limits from it. One tap skips it.
 - Works with Gatekeeper for Mac: exam mode started on the Mac closes every kind of site in the browser until it ends, and the Mac shows today's minutes. Optional, and it stays on your computer.
 
+**Data usage, with the Mac app link:** no new box is ticked for data sent off the device, because nothing goes to a server. The privacy policy (0.2.0 text, `~/gatekeeper-relay/pages/privacy-0.2.0.html`) says what the extension shares with the Mac app on the computer: the goal, each watched kind's minutes and status today, and exam mode. It also says that the Mac app keeps it in `~/Library/Application Support/Gatekeeper/today.json`, where other apps the user runs can read it.
+
 **Data usage, what to tick:** the same boxes as 0.1.1. Website content now also covers video titles and channels; user activity / personal communications now also covers what the user writes in the rules chat.

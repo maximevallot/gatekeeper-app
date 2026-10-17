@@ -874,31 +874,33 @@ export function endExam(state, sentence, now) {
 
 // ---------- the Mac app (native messaging, contract version 1 in ~/gatekeeper-mac/docs/contract.md) ----------
 
-export const MAC_PAGES = { rules: "pages/rules.html", talk: "pages/talk.html", week: "pages/week.html" };
+export const MAC_PAGES = { today: "pages/popup.html", rules: "pages/rules.html", talk: "pages/talk.html", week: "pages/week.html", exam: "pages/rules.html#exam" };
 
-/** Today, for Gatekeeper for Mac: watched kinds with what the engine decided (left, status), exam mode. */
+/**
+ * Today, for Gatekeeper for Mac: todaySummary() as is (each watched kind with what the engine decided:
+ * left, status, fraction), plus who sent it, the pages, and exam mode. The Mac shows status as sent.
+ */
 export function snapshot(state, now, { extensionId } = {}) {
   const s = rollover(state, now);
   const today = todaySummary(s, now);
   return {
-    type: "snapshot", v: 1, at: s.clock.floor, extensionId, pages: MAC_PAGES,
-    goal: s.goal || "", dayStart: s.rules.dayStart, endsAt: s.usage.endsAt,
-    kinds: today.kinds.map((k) => ({ kind: k.kind, label: k.label, minutes: k.minutes, usedSeconds: Math.round(usedSeconds(s, k.kind)), left: k.left, status: k.status })),
-    pending: s.pending ? { from: s.pending.from } : null,
+    ...today, type: "snapshot", v: 1, at: s.clock.floor, extensionId, pages: MAC_PAGES,
     exam: today.exam ? { until: today.exam.until, goal: today.exam.goal } : null,
-    watch: watching(s) ? { until: s.watch.until } : null,
   };
 }
 
-/** Whether two snapshots differ in what the Mac shows (minutes, not seconds; not the time sent). */
+/** Whether two snapshots differ in what the Mac shows: whole minutes left, not the ring's every second. */
 export function snapshotKey(snap) {
-  return JSON.stringify({ ...snap, at: 0, kinds: snap.kinds.map((k) => ({ ...k, usedSeconds: Math.floor(k.usedSeconds / 60) })) });
+  return JSON.stringify({ ...snap, at: 0, kinds: snap.kinds.map(({ fraction, ...k }) => k), watch: snap.watch && { ...snap.watch, kinds: undefined } });
 }
 
-/** One request from the Mac's reply, applied through the engine; anything unknown is refused. */
+/**
+ * One request from the Mac's reply, applied through the engine. The Mac only asks to tighten: exam.start.
+ * Anything else, exam.end included, is refused: any app running as the user could write a request, so a
+ * request that loosens would be a way around the rules. Ending exam mode early is typed in the extension.
+ */
 export function applyMacRequest(state, req, now) {
   if (!req || typeof req !== "object") return { state, refused: "bad_request" };
   if (req.type === "exam.start") return startExam(state, { until: req.until, goal: req.goal }, now);
-  if (req.type === "exam.end") return endExam(state, req.sentence, now);
   return { state, refused: "unknown_type" };
 }

@@ -38,15 +38,22 @@ test("the later end wins; an earlier one, or no exam at all, does not shorten it
   assert.ok(startExam(setUp({}), { until: MON + 60 * 86400e3 }, MON).state.rules.exam.until <= MON + 14 * 86400e3, "at most 14 days");
 });
 
-test("exam.end only with the sentence, word for word", () => {
+test("the Mac can only tighten: exam.end is refused even with the sentence", () => {
   const s = startExam(setUp({}), { until: WED }, MON).state;
-  assert.equal(applyMacRequest(s, { type: "exam.end", sentence: "stop" }, MON).refused, "wrong_sentence");
-  assert.equal(applyMacRequest(s, { type: "exam.end" }, MON).refused, "wrong_sentence");
-  const off = applyMacRequest(s, { type: "exam.end", sentence: "  " + EXAM_END_SENTENCE + " " }, MON).state;
+  for (const req of [{ type: "exam.end", sentence: EXAM_END_SENTENCE }, { type: "exam.end" }, { type: "exam.pause" }]) {
+    const r = applyMacRequest(s, req, MON);
+    assert.equal(r.refused, "unknown_type", req.type);
+    assert.ok(examOn(r.state));
+  }
+});
+
+test("ending exam mode early, in the extension, takes the sentence word for word", () => {
+  const s = startExam(setUp({}), { until: WED }, MON).state;
+  assert.equal(endExam(s, "stop", MON).refused, "wrong_sentence");
+  const off = endExam(s, "  " + EXAM_END_SENTENCE + " ", MON).state;
   assert.ok(!examOn(off));
   assert.equal(decide(off, { url: "https://www.youtube.com/", now: MON }).verdict, "allow");
   assert.equal(endExam(off, EXAM_END_SENTENCE, MON).refused, "not_on");
-  assert.equal(applyMacRequest(s, { type: "exam.pause" }, MON).refused, "unknown_type");
 });
 
 test("in exam mode the gate does not talk, and nothing counts", () => {
@@ -71,13 +78,17 @@ test("the snapshot follows the contract, with what the engine decided", () => {
   const snap = snapshot(s, MON + 2000, { extensionId: "kfikbbdocggfgfhaegkgkfomhmacdbjp" });
   assert.equal(snap.type, "snapshot");
   assert.equal(snap.v, 1);
-  assert.deepEqual(snap.pages, { rules: "pages/rules.html", talk: "pages/talk.html", week: "pages/week.html" });
-  assert.equal(snap.endsAt, at("2026-10-20T04:00:00-04:00"));
-  assert.deepEqual(snap.kinds, [
-    { kind: "social", label: "Social media", minutes: 15, usedSeconds: 2, left: 15, status: "open" },
-    { kind: "video", label: "Video", minutes: 0, usedSeconds: 0, left: 0, status: "closed" },
+  assert.equal(snap.extensionId, "kfikbbdocggfgfhaegkgkfomhmacdbjp");
+  assert.deepEqual(snap.pages, { today: "pages/popup.html", rules: "pages/rules.html", talk: "pages/talk.html", week: "pages/week.html", exam: "pages/rules.html#exam" });
+  assert.equal(snap.reopensAt, at("2026-10-20T04:00:00-04:00"));
+  assert.equal(snap.goal, "Finish problem set 4");
+  assert.equal(snap.waiting, false);
+  assert.deepEqual(snap.kinds.map(({ fraction, ...k }) => k), [
+    { kind: "social", label: "Social media", short: "Social", minutes: 15, left: 15, status: "open" },
+    { kind: "video", label: "Video", short: "Video", minutes: 0, left: 0, status: "closed" },
   ]);
-  assert.equal(snap.pending, null);
+  assert.ok(snap.kinds[0].fraction > 0.99 && snap.kinds[0].fraction < 1);
+  assert.deepEqual(Object.keys(snap.kinds[0]).sort(), ["fraction", "kind", "label", "left", "minutes", "short", "status"]);
   assert.equal(snap.exam, null);
   const e = snapshot(startExam(s, { until: WED, goal: "midterm" }, MON).state, MON, {});
   assert.deepEqual(e.exam, { until: WED, goal: "midterm" });

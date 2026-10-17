@@ -64,6 +64,7 @@ try {
   const sw = await connect((t) => t.type === "service_worker");
   const st = () => sw.evaluate(`chrome.storage.local.get('state').then(r => r.state)`);
   const rulesUrl = await sw.evaluate(`chrome.runtime.getURL("pages/rules.html")`);
+  const base = (await sw.evaluate(`chrome.runtime.getURL("")`)).replace(/\/$/, "");
   await p.send("Page.enable");
   await p.send("Page.navigate", { url: rulesUrl }); await sleep(2500);
 
@@ -71,8 +72,9 @@ try {
   const first = snaps[snaps.length - 1] || {};
   check("a snapshot reached the bridge", snaps.length >= 1, snaps.length);
   check("it follows the contract", first.type === "snapshot" && first.v === 1 && first.extensionId === id && first.pages.talk === "pages/talk.html"
-    && first.goal === "Finish problem set 4" && first.endsAt > Date.now() && first.exam === null && first.pending === null, first);
-  check("with each watched kind, its minutes, and what the engine decided", JSON.stringify(first.kinds) === JSON.stringify([{ kind: "social", label: "Social media", minutes: 15, usedSeconds: 0, left: 15, status: "open" }]), first.kinds);
+    && first.pages.exam === "pages/rules.html#exam" && first.goal === "Finish problem set 4" && first.reopensAt > Date.now() && first.exam === null && first.waiting === false, first);
+  const k = (first.kinds || [])[0] || {};
+  check("with each watched kind and what the engine decided", first.kinds.length === 1 && k.kind === "social" && k.short === "Social" && k.minutes === 15 && k.left === 15 && k.status === "open" && k.fraction > 0.99, first.kinds);
   check("the rules page says the Mac app is connected", /Connected/.test(await p.evaluate(`document.getElementById('mac-sub').textContent`)));
 
   // exam.start from the Mac: applied at once, every kind closed, and reported in the next snapshot.
@@ -86,14 +88,18 @@ try {
   await p.send("Page.navigate", { url: "https://www.youtube.com/" }); await sleep(2500);
   check("YouTube, not even watched, is closed for the exam", /Exam mode until/.test(await p.evaluate(`(document.getElementById('headline') || {}).textContent || ''`)));
 
-  // exam.end: refused without the sentence, applied with it.
-  queue.push(...([{ id: "9A20", type: "exam.end", sentence: "let me out" }]));
-  await p.send("Page.navigate", { url: rulesUrl }); await sleep(3000);
-  check("exam.end without the sentence is refused", !!((await st()).rules.exam), (await st()).rules.exam);
+  // The Mac only tightens: an exam.end from it is refused, even with the sentence.
   queue.push(...([{ id: "9A21", type: "exam.end", sentence: SENTENCE }]));
-  await p.send("Page.reload"); await sleep(3000);
+  await p.send("Page.navigate", { url: rulesUrl }); await sleep(3000);
+  check("exam.end from the Mac is refused, even with the sentence", !!((await st()).rules.exam), (await st()).rules.exam);
+  // "End exam mode early" on the Mac opens pages.exam: the rules page, with the sentence form open.
+  await p.send("Page.navigate", { url: base + "/" + first.pages.exam }); await sleep(1500);
+  check("pages.exam opens the end-early form", (await p.evaluate(`!document.getElementById('exam-form').classList.contains('hidden') && document.activeElement && document.activeElement.id === 'exam-sentence'`)) === true);
+  await p.evaluate(`document.getElementById('exam-sentence').value = 'let me out'; document.getElementById('exam-form').requestSubmit();`); await sleep(1200);
+  check("the wrong sentence keeps exam mode on", !!((await st()).rules.exam));
+  await p.evaluate(`document.getElementById('exam-sentence').value = ${JSON.stringify(SENTENCE)}; document.getElementById('exam-form').requestSubmit();`); await sleep(2500);
   s = await st();
-  check("exam.end with the sentence ends it", !s.rules.exam, s.rules.exam);
+  check("the sentence, typed in the extension, ends it", !s.rules.exam, s.rules.exam);
   check("and the next snapshot says so", snapshots().slice(-1)[0].exam === null);
 } catch (e) {
   console.log("FAIL", e.message); failures++;
