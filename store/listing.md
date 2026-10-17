@@ -87,6 +87,15 @@ Your data: your rules, budgets and history stay in your browser. Gatekeeper neve
 
 - Host permissions (the built-in list of social, video, game, news and shopping sites, and the extension's relay): Needed to close those sites when their budget is used up; on YouTube, to read the address and title of the video in front and to ask YouTube's oEmbed address for its title and channel, so the user's video rules can be applied; and to reach the relay for the optional AI features.
 
-No permission is added: the update shows no new warning and does not disable existing installs.
+**Permission justifications: add, for the build with the Mac app link**
+
+- `nativeMessaging` (optional): Asked for only when the user turns on "Mac app" on the rules page. It lets the extension share today's minutes per kind, the goal and exam mode with Gatekeeper for Mac, the user's own app on the same computer, and receive exam-mode requests from it. Nothing is sent over the network.
+
+Without the Mac app link, no permission is added, and the update shows no new warning and does not disable existing installs. With it, `nativeMessaging` is optional, so it still shows no warning at install; the browser asks when the user turns the switch on.
+
+**Description: add, for the build with the Mac app link and the watch week**
+
+- Starts with a week of just watching: Gatekeeper counts your time and blocks nothing, then shows your week and suggests limits from it. One tap skips it.
+- Works with Gatekeeper for Mac: exam mode started on the Mac closes every kind of site in the browser until it ends, and the Mac shows today's minutes. Optional, and it stays on your computer.
 
 **Data usage, what to tick:** the same boxes as 0.1.1. Website content now also covers video titles and channels; user activity / personal communications now also covers what the user writes in the rules chat.

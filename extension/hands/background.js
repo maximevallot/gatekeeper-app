@@ -19,6 +19,8 @@ let blocking = null; // the enforcement last written into the browser's rules
 let closedBefore = ""; // the closed domains at the last sweep of open tabs
 let blind = []; // watched domains the browser does not let Gatekeeper see
 let watchTabOpened = false; // the end-of-watch-week tab, opened once per worker
+let macSent = null; // the last snapshot sent to Gatekeeper for Mac, as snapshotKey
+let macStatus = { connected: false, error: null }; // how the last exchange went
 let lastTick = Date.now();
 
 async function load() {
@@ -42,6 +44,7 @@ function update(step) {
       await chrome.storage.local.set({ state });
     }
     await syncBlocking();
+    macSync();
     return out;
   });
   queue = run.catch(() => {});
@@ -55,6 +58,55 @@ async function withheldDomains() {
   const granted = new Set(origins.map((o) => (o.match(/^\*:\/\/\*\.([^/]+)\/\*$/) || [])[1]).filter(Boolean));
   const covered = (d) => { for (let x = d; x.includes("."); x = x.slice(x.indexOf(".") + 1)) if (granted.has(x)) return true; return false; };
   return all ? [] : engine.watchedDomains(state).filter((d) => !covered(d));
+}
+
+// ---------- Gatekeeper for Mac (native messaging, contract version 1) ----------
+
+const MAC_HOST = "com.gatekeeper.helper";
+const NATIVE = { permissions: ["nativeMessaging"] };
+
+/** Send today to the Mac app when what it shows changed, or always with `force` (the minute's heartbeat). */
+let macBusy = false, macAgain = false, macForce = false;
+async function macSync(force = false) {
+  // One exchange at a time; a change during one is sent right after it.
+  if (macBusy) { macAgain = true; macForce = macForce || force; return; }
+  macBusy = true;
+  try { await macExchange(force); } finally {
+    macBusy = false;
+    if (macAgain) { const f = macForce; macAgain = macForce = false; macSync(f); }
+  }
+}
+
+async function macExchange(force) {
+  if (!state || !(await chrome.permissions.contains(NATIVE))) return;
+  if (typeof chrome.runtime.sendNativeMessage !== "function") {
+    // Granted, but this worker started before the grant and has no binding for it yet.
+    macStatus = { connected: false, error: "reload_needed" };
+    return;
+  }
+  const snap = engine.snapshot(state, Date.now(), { extensionId: chrome.runtime.id });
+  const key = engine.snapshotKey(snap);
+  if (!force && key === macSent) return;
+  macSent = key;
+  let reply;
+  try {
+    reply = await chrome.runtime.sendNativeMessage(MAC_HOST, snap);
+  } catch (e) {
+    // No Mac app installed, or it failed: the extension works on its own, and tries again next time.
+    macStatus = { connected: false, error: String((e && e.message) || e).slice(0, 200) };
+    macSent = null;
+    return;
+  }
+  macStatus = { connected: !!(reply && reply.ok), error: reply && reply.ok ? null : (reply && reply.error) || "bad_reply" };
+  const requests = reply && reply.ok && Array.isArray(reply.requests) ? reply.requests.slice(0, 10) : [];
+  if (requests.length) {
+    await update((s) => {
+      let n = s;
+      for (const r of requests) n = engine.applyMacRequest(n, r, Date.now()).state;
+      return { state: n };
+    });
+    macSync(true); // the result shows in the next snapshot
+  }
 }
 
 async function syncBlocking() {
@@ -245,6 +297,15 @@ const handlers = {
     return preview.error ? { failed: preview.error } : preview;
   },
   // The watch week: start it from the welcome tab, end it early with one tap, and mark its summary seen.
+  async endExam({ sentence }) {
+    const out = await update((s) => engine.endExam(s, sentence, Date.now()));
+    macSync(true);
+    return { ok: !out.refused, refused: out.refused };
+  },
+  async mac() {
+    await macSync(true);
+    return { ...macStatus, permitted: await chrome.permissions.contains(NATIVE) };
+  },
   async watch({ goal }) {
     await update((s) => ({ state: engine.startWatch(s, { goal }, Date.now()) }));
     return { ok: true };
@@ -295,6 +356,7 @@ chrome.windows.onFocusChanged.addListener(tick);
 // The alarm wakes the worker if the browser ever stops it; the interval is the real clock, and its
 // browser calls every two seconds keep the worker alive.
 chrome.alarms.create("tick", { periodInMinutes: 0.5 });
-chrome.alarms.onAlarm.addListener(tick);
+chrome.alarms.create("mac", { periodInMinutes: 1 }); // the Mac app's heartbeat, and its requests
+chrome.alarms.onAlarm.addListener((a) => (a.name === "mac" ? macSync(true) : tick()));
 setInterval(tick, TICK_MS);
 update((s) => ({ state: engine.rollover(s, Date.now()) }));

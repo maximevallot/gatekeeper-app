@@ -1,7 +1,7 @@
 // Your rules, saved as you go. Every change goes through the engine's proposeRules: what tightens applies
 // now, what loosens waits for the morning and shows as an amber row with a way to keep today's number.
 import { KINDS, KIND_ORDER } from "../engine/catalog.js";
-import { DEFAULT_MINUTES, label } from "../engine/engine.js";
+import { DEFAULT_MINUTES, label, examOn, EXAM_END_SENTENCE } from "../engine/engine.js";
 import { videoName } from "../engine/videos.js";
 import {
   ask, el, when, clock, stepper, checkWorker, warnings, whatsSentToggle, chatIcon, privateToggle, extensionsPage,
@@ -198,6 +198,46 @@ $("appearance").addEventListener("click", (e) => {
 
 $("talk-link").append(chatIcon(), "Change something by talking");
 
+// ---------- exam mode ----------
+
+function renderExam() {
+  const s = got.state;
+  const on = examOn(s);
+  $("exam-row").classList.toggle("hidden", !on);
+  if (!on) return;
+  $("exam-title").textContent = `Exam mode until ${when(s.rules.exam.until)}`;
+  $("exam-goal").textContent = s.rules.exam.goal || "Every kind of site is closed until then.";
+  $("exam-hint").textContent = `To end it now, type: ${EXAM_END_SENTENCE}`;
+}
+$("exam-end-open").addEventListener("click", () => { $("exam-form").classList.toggle("hidden"); $("exam-sentence").focus(); });
+$("exam-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const r = await ask("endExam", { sentence: $("exam-sentence").value }).catch(() => ({ refused: "unreachable" }));
+  saved(r.ok ? "Exam mode is off" : r.refused === "wrong_sentence" ? "That isn't the sentence; exam mode stays on" : "Not saved");
+  $("exam-sentence").value = "";
+  load();
+});
+
+// ---------- the Mac app ----------
+
+const NATIVE = { permissions: ["nativeMessaging"] };
+async function renderMac() {
+  const m = await ask("mac").catch(() => ({ permitted: false }));
+  $("mac").checked = !!m.permitted;
+  $("mac-sub").textContent = !m.permitted
+    ? "Off. With Gatekeeper for Mac, shares today's minutes and exam mode, on this Mac only."
+    : m.connected
+      ? "Connected. Shares your goal, each kind's minutes today and exam mode with Gatekeeper for Mac. It stays on this Mac."
+      : m.error === "reload_needed"
+        ? "Reload Gatekeeper once (in your browser's extensions page) to connect."
+        : "Gatekeeper for Mac isn't answering. Is it installed and open?";
+}
+$("mac").addEventListener("change", () => {
+  // The browser asks the user; the request has to start inside the click.
+  const change = $("mac").checked ? chrome.permissions.request(NATIVE) : chrome.permissions.remove(NATIVE);
+  change.catch(() => false).then(renderMac);
+});
+
 async function load() {
   got = await ask("state");
   // During the watch week the rules wait: nothing is blocked until it ends or the user ends it.
@@ -209,6 +249,8 @@ async function load() {
   if (!warned) warned = warnings({ ...got, incognito: true }, $("daily")) >= 0; // private windows: shown in Settings
   renderKinds();
   renderSettings();
+  renderExam();
+  renderMac();
 }
 
 checkWorker();

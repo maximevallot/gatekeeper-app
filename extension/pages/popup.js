@@ -21,7 +21,7 @@ function ring(k, reopensAt) {
         "stroke-dasharray": `${Math.max(0.5, k.fraction * C)} ${C}`, transform: "rotate(-90 48 48)" })])),
     closed ? lockIcon(28) : el("div", { class: "count" }, String(k.left)));
   const state = k.status === "open" ? el("div", { class: "state" }, "min left")
-    : el("div", { class: "state closed" }, k.status === "closed" ? "all day" : `till ${clock(reopensAt)}`);
+    : el("div", { class: "state closed" }, k.exam ? "exam" : k.status === "closed" ? "all day" : `till ${clock(reopensAt)}`);
   return el("div", { class: "ring", "data-kind": k.kind }, dial, el("div", { class: "label" }, k.short), state);
 }
 
@@ -43,7 +43,8 @@ async function show() {
     : [el("p", { class: "lead", style: "grid-column: 1 / -1" }, "Nothing is watched yet.")]));
   $("goal").textContent = t.goal;
   $("goal-card").classList.toggle("hidden", !t.goal);
-  if (blind && blind.length) { $("mode").textContent = "Check site access"; $("mode").className = "pill warn"; }
+  if (t.exam) { $("mode").textContent = `Exam mode until ${clock(t.exam.until)}`; $("mode").className = "pill closed"; }
+  else if (blind && blind.length) { $("mode").textContent = "Check site access"; $("mode").className = "pill warn"; }
   else if (t.waiting) { $("mode").textContent = "Change tomorrow"; $("mode").className = "pill warn"; }
   $("change").replaceChildren(chatIcon(), "Change something");
 }

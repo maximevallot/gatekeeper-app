@@ -29,7 +29,10 @@ async function show() {
   document.title = `${d.label || host} closed`;
   $("site").textContent = d.label ? `${host} · ${d.label}` : host;
   const until = `Closed until ${when(d.reopensAt).replace(/^(today|tomorrow) at (.*)$/, "$2 $1")}`;
-  if (d.video) {
+  if (d.exam) {
+    $("headline").textContent = `Exam mode until ${when(d.exam.until).replace(/^(today|tomorrow) at (.*)$/, "$2 $1")}`;
+    $("used").textContent = d.exam.goal ? `For ${d.exam.goal}. Every kind of site is closed until then.` : "Every kind of site is closed until then.";
+  } else if (d.video) {
     // A video rule, not a kind: the gate does not argue with it; the rules page changes it.
     const rule = `Your rule on ${d.video.name} videos${d.video.except ? `, except ${d.video.except}` : ""}`;
     $("headline").textContent = d.verdict === "block" ? "This video is closed" : until;
@@ -48,7 +51,8 @@ async function show() {
   $("closed").classList.remove("hidden");
   warnings(decided, $("closed"));
   talk = { on: decided.talk, host, kind: d.label };
-  if (d.video) shut("");
+  if (d.exam) { shut(""); $("rules-link").textContent = "End exam mode early"; }
+  else if (d.video) shut("");
   else if (decided.cooldownUntil) shut(`We already talked about this. The answer stands until ${clock(decided.cooldownUntil)}.`);
   else $("message").focus();
 }

@@ -95,6 +95,9 @@
     "*://*.zalando.com/*",
     "https://gatekeeper-relay.mvallot22.workers.dev/*"
   ],
+  "optional_permissions": [
+    "nativeMessaging"
+  ],
   "optional_host_permissions": [
     "*://*/*"
   ],

@@ -294,7 +294,9 @@ export function todaySummary(state, now) {
     day: Math.min(WATCH_DAYS, Math.floor((s.clock.floor - s.watch.from) / 86400e3) + 1), of: WATCH_DAYS, until: s.watch.until,
     kinds: Object.keys(KINDS).map((k) => ({ kind: k, label: label(k), short: SHORT[k] || label(k), used: Math.floor(usedSeconds(s, k) / 60) })),
   } : null;
-  return { kinds, goal: s.goal || "", reopensAt: s.usage.endsAt, setupDone: !!s.setupDone, waiting: !!s.pending, watch, watchReady: watchReady(s) };
+  const exam = examOn(s) ? { ...s.rules.exam } : null;
+  if (exam) for (const k of kinds) { k.status = "closed"; k.exam = true; }
+  return { kinds, goal: s.goal || "", reopensAt: s.usage.endsAt, setupDone: !!s.setupDone, waiting: !!s.pending, watch, watchReady: watchReady(s), exam };
 }
 
 const usedSeconds = (s, kind) => s.usage.seconds[kind] || 0;
@@ -313,6 +315,17 @@ function passFor(s, url, kind) {
  */
 export function decide(state, { url, title = "", now }) {
   const s = rollover(state, now);
+  if (examOn(s)) {
+    // Exam mode closes every kind, watched or not, until it ends; a video rule that makes videos free still holds.
+    const video = videoDecision(s, url, title);
+    if (video && video.verdict === "allow" && !video.watched) return video;
+    const kind = kindOf(s, url);
+    if (KINDS[kind]) {
+      return { verdict: "block", kind, bucket: kind, label: label(kind), watched: true, title, exam: { ...s.rules.exam },
+        usedMinutes: Math.floor(usedSeconds(s, kind) / 60), budgetMinutes: (s.rules.kinds[kind] || {}).minutes ?? null, reopensAt: s.rules.exam.until };
+    }
+    return { verdict: "allow", kind, watched: false };
+  }
   if (watching(s)) {
     // The watch week counts every kind and blocks nothing.
     const kind = kindOf(s, url);
@@ -479,13 +492,15 @@ export function sortFailed(state, domain, now) {
 /** Kinds closed right now: 0 minutes, or today's budget spent. */
 export function closedKinds(state, now) {
   const s = rollover(state, now);
+  if (examOn(s)) return Object.keys(KINDS);
   if (watching(s)) return [];
   return Object.keys(s.rules.kinds).filter((k) => s.rules.kinds[k].minutes === 0 || usedSeconds(s, k) >= s.rules.kinds[k].minutes * 60);
 }
 
 /** Every domain that counts against a watched kind: the catalog's, the user's own and the sorted ones. */
 export function watchedDomains(state) {
-  const watched = (k) => !!state.rules.kinds[k];
+  const exam = examOn(state);
+  const watched = (k) => !!KINDS[k] && (exam || !!state.rules.kinds[k]);
   const out = [];
   for (const [k, def] of Object.entries(KINDS)) if (watched(k)) out.push(...def.domains);
   for (const [d, k] of Object.entries(state.rules.sites || {})) if (watched(k)) out.push(d);
@@ -551,7 +566,9 @@ export function cleanRules(rules, fallback) {
   }
   const ds = Number(r.dayStart);
   const dayStart = Number.isInteger(ds) && ds >= 0 && ds <= 23 ? ds : fallback.dayStart;
-  return { kinds, sites, videos: cleanVideos(r.videos), dayStart };
+  const e = r.exam;
+  const exam = e && Number.isFinite(Number(e.until)) ? { until: Number(e.until), goal: String(e.goal || "").replace(/\s+/g, " ").trim().slice(0, 200) } : null;
+  return { kinds, sites, videos: cleanVideos(r.videos), dayStart, exam };
 }
 
 /**
@@ -578,7 +595,11 @@ export function tighten(cur, next, state) {
   }
   const youtube = kindUnder(cur, "youtube.com"); // the kind YouTube's own pages count against today
   const videos = tightenVideos(cur.videos || [], next.videos || [], { watched: !!(youtube && kinds[youtube]) });
-  return { ...next, kinds, sites, videos, dayStart: cur.dayStart };
+  // Exam mode in force can only be extended now; ending or shortening it waits (the sentence ends it at once).
+  const t = (state.clock && state.clock.floor) || 0;
+  const a = cur.exam && cur.exam.until > t ? cur.exam : null, b = next.exam || null;
+  const exam = a ? (b && b.until >= a.until ? b : a) : b;
+  return { ...next, kinds, sites, videos, dayStart: cur.dayStart, exam };
 }
 
 function canon(v) {
@@ -606,6 +627,11 @@ export function describeChanges(cur, next) {
   }
   out.push(...describeVideoChanges(cur.videos || [], next.videos || []));
   if (cur.dayStart !== next.dayStart) out.push({ text: `The day starts at ${next.dayStart}:00` });
+  const ea = cur.exam || null, eb = next.exam || null;
+  if ((ea && ea.until) !== (eb && eb.until)) {
+    const until = (x) => new Date(x.until).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" });
+    out.push({ text: eb ? `Exam mode until ${until(eb)}` : "Exam mode ends" });
+  }
   return out;
 }
 
@@ -664,6 +690,7 @@ export function gateRequest(state, { url, message, now }) {
   const text = String(message || "").trim();
   if (!consented(s, "talk")) return { refused: "no_consent" };
   if (d.verdict === "allow") return { refused: "open" };
+  if (d.exam) return { refused: "exam" }; // exam mode has no second round
   if (d.video) return { refused: "video_rule" }; // a video rule is changed on the rules page, not argued at the gate
   const cool = (s.cooldowns || {})[d.kind] || 0;
   if (cool > t) return { refused: "cooldown", until: cool };
@@ -810,4 +837,68 @@ export function chatPreview(state, answer, now) {
   const fresh = (list, old) => { const seen = new Set(old.map((c) => c.text)); return list.filter((c) => !seen.has(c.text)); };
   const nowChanges = fresh(r.now, before.now), later = fresh(r.later, before.later);
   return { reply, question, rules, now: nowChanges, later, from: later.length ? r.from : null, skipped: skipped.length, needsAccess };
+}
+
+// ---------- exam mode ----------
+// Until a set time, every kind is closed and the gate does not talk. Starting it or moving its end later is a
+// tightening and applies at once; ending it early takes the sentence below, typed in full.
+
+export const EXAM_END_SENTENCE = "I am choosing to stop preparing for my exam";
+export const MAX_EXAM_DAYS = 14;
+
+export function examOn(state) {
+  const e = state.rules && state.rules.exam;
+  return !!e && e.until > ((state.clock && state.clock.floor) || 0);
+}
+
+/** Start exam mode, or move its end later (the later end wins). Applied through proposeRules: a tightening. */
+export function startExam(state, { until, goal }, now) {
+  const s = rollover(state, now);
+  const t = s.clock.floor;
+  const end = Math.min(Number(until), t + MAX_EXAM_DAYS * 86400e3);
+  if (!Number.isFinite(end) || end <= t) return { state: s, refused: "bad_until" };
+  const cur = examOn(s) ? s.rules.exam : null;
+  const exam = { until: Math.max(end, cur ? cur.until : 0), goal: String(goal || (cur && cur.goal) || "").replace(/\s+/g, " ").trim().slice(0, 200) };
+  const r = proposeRules(s, { ...wantedRules(s), exam }, now);
+  return { state: r.state, exam };
+}
+
+/** End exam mode now, but only with the sentence, word for word. */
+export function endExam(state, sentence, now) {
+  const s = rollover(state, now);
+  if (String(sentence || "").replace(/\s+/g, " ").trim() !== EXAM_END_SENTENCE) return { state: s, refused: "wrong_sentence" };
+  if (!examOn(s)) return { state: s, refused: "not_on" };
+  const off = (r) => (r ? { ...r, exam: null } : r);
+  return { state: { ...s, rules: off(s.rules), pending: s.pending ? { ...s.pending, rules: off(s.pending.rules) } : null } };
+}
+
+// ---------- the Mac app (native messaging, contract version 1 in ~/gatekeeper-mac/docs/contract.md) ----------
+
+export const MAC_PAGES = { rules: "pages/rules.html", talk: "pages/talk.html", week: "pages/week.html" };
+
+/** Today, for Gatekeeper for Mac: watched kinds with what the engine decided (left, status), exam mode. */
+export function snapshot(state, now, { extensionId } = {}) {
+  const s = rollover(state, now);
+  const today = todaySummary(s, now);
+  return {
+    type: "snapshot", v: 1, at: s.clock.floor, extensionId, pages: MAC_PAGES,
+    goal: s.goal || "", dayStart: s.rules.dayStart, endsAt: s.usage.endsAt,
+    kinds: today.kinds.map((k) => ({ kind: k.kind, label: k.label, minutes: k.minutes, usedSeconds: Math.round(usedSeconds(s, k.kind)), left: k.left, status: k.status })),
+    pending: s.pending ? { from: s.pending.from } : null,
+    exam: today.exam ? { until: today.exam.until, goal: today.exam.goal } : null,
+    watch: watching(s) ? { until: s.watch.until } : null,
+  };
+}
+
+/** Whether two snapshots differ in what the Mac shows (minutes, not seconds; not the time sent). */
+export function snapshotKey(snap) {
+  return JSON.stringify({ ...snap, at: 0, kinds: snap.kinds.map((k) => ({ ...k, usedSeconds: Math.floor(k.usedSeconds / 60) })) });
+}
+
+/** One request from the Mac's reply, applied through the engine; anything unknown is refused. */
+export function applyMacRequest(state, req, now) {
+  if (!req || typeof req !== "object") return { state, refused: "bad_request" };
+  if (req.type === "exam.start") return startExam(state, { until: req.until, goal: req.goal }, now);
+  if (req.type === "exam.end") return endExam(state, req.sentence, now);
+  return { state, refused: "unknown_type" };
 }

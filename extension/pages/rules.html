@@ -16,6 +16,20 @@
 
   <a class="btn wide" href="talk.html?from=rules" id="talk-link"></a>
 
+  <div class="card rowblock hidden" id="exam-row">
+    <div class="row" style="padding: 0">
+      <div class="stack"><div class="name" id="exam-title"></div><div class="sub" id="exam-goal"></div></div>
+      <button class="link" type="button" id="exam-end-open">End early</button>
+    </div>
+    <form class="section hidden" id="exam-form" style="gap: 8px">
+      <label for="exam-sentence" class="small muted" id="exam-hint"></label>
+      <div class="inline">
+        <input class="field" id="exam-sentence" autocomplete="off">
+        <button class="btn" type="submit">End exam mode</button>
+      </div>
+    </form>
+  </div>
+
   <div class="section" id="daily">
     <h2>Daily time</h2>
     <div class="card" id="kinds"></div>
@@ -47,6 +61,10 @@
       <div class="row">
         <div class="stack"><div class="name">Private windows</div><div class="sub" id="private-sub"></div></div>
         <span class="pill" id="private-pill"></span>
+      </div>
+      <div class="row" id="mac-row">
+        <div class="stack"><div class="name">Mac app</div><div class="sub" id="mac-sub"></div></div>
+        <label class="switch"><input type="checkbox" id="mac" aria-label="Mac app"><span></span></label>
       </div>
       <div class="row">
         <div class="stack"><div class="name">Appearance</div></div>

@@ -15,6 +15,9 @@ test("the extension may act only on the catalog's sites; anything else is asked 
 test("no permission beyond the four it needs, and nothing that reads pages; plain declarativeNetRequest, so a block holds where site access was withheld (C2)", () => {
   assert.deepEqual(m.permissions.sort(), ["alarms", "declarativeNetRequest", "idle", "storage"]);
   assert.equal(m.content_scripts, undefined);
+  // The Mac app's link is optional, asked for by its switch on the rules page, so installing shows no new warning.
+  assert.deepEqual(m.optional_permissions, ["nativeMessaging"]);
+  assert.ok(!m.permissions.includes("nativeMessaging"));
   // Only the gate is reachable from web pages, from any page a link to a closed site starts on (a narrower
   // list ends such a click on Chrome's error page), and under a per-session address pages cannot probe for.
   assert.deepEqual(m.web_accessible_resources, [{ resources: ["pages/gate.html"], matches: ["<all_urls>"], use_dynamic_url: true }]);
