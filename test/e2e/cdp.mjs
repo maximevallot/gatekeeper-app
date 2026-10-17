@@ -9,7 +9,13 @@ export async function connect(match, port = PORT) {
   await new Promise((r) => (ws.onopen = r));
   let n = 0; const w = new Map(); const events = [];
   ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && w.has(d.id)) { w.get(d.id)(d); w.delete(d.id); } else events.push(d); };
-  const send = (method, params = {}) => new Promise((r) => { const id = ++n; w.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+  // A call to a target that went away (a restarted service worker) never answers: fail it after 20 s, by name.
+  const send = (method, params = {}) => new Promise((r, reject) => {
+    const id = ++n;
+    const timer = setTimeout(() => { w.delete(id); reject(new Error(`no answer to ${method} from ${t.type} ${t.url.slice(0, 80)}`)); }, 20000);
+    w.set(id, (d) => { clearTimeout(timer); r(d); });
+    ws.send(JSON.stringify({ id, method, params }));
+  });
   const evaluate = async (expression) => {
     const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     if (r.result.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails).slice(0, 400));

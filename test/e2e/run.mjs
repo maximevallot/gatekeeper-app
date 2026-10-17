@@ -58,6 +58,13 @@ try {
   const m = JSON.parse(readFileSync(join(ext, "manifest.json"), "utf8"));
   m.host_permissions.push("*://*/*", "http://localhost/*");
   writeFileSync(join(ext, "manifest.json"), JSON.stringify(m));
+  // The browser's idle state is the whole Mac's: with nobody at the keyboard for a minute, nothing is
+  // counted and the game is never sorted. The test copy treats the user as present.
+  const bg = join(ext, "hands", "background.js");
+  const code = readFileSync(bg, "utf8");
+  const present = code.replace('(await chrome.idle.queryState(IDLE_SECONDS)) === "active"', "true");
+  if (present === code) throw new Error("the idle check in hands/background.js moved; update the e2e harness");
+  writeFileSync(bg, present);
 
   const browser = spawn(BROWSER, ["--headless=new", `--user-data-dir=${join(work, "profile")}`, "--no-first-run", "--no-default-browser-check",
     "--disable-features=DisableLoadExtensionCommandLineSwitch", `--load-extension=${ext}`, `--remote-debugging-port=${process.env.CDP_PORT || 9334}`, "about:blank"],
