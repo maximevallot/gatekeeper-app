@@ -1,5 +1,5 @@
 // Your week: minutes on watched sites per day against what was allowed, from history kept on this device.
-import { weekSummary } from "../engine/engine.js";
+import { weekSummary, baseline, watching } from "../engine/engine.js";
 import { ask, el, checkWorker } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
@@ -19,7 +19,7 @@ async function show() {
   $("bars").replaceChildren(
     ...w.days.map((d) => d.none
       ? el("div", { class: "bar none", title: "Not recorded" })
-      : el("div", { class: "bar" + (d.allowed && d.minutes > d.allowed ? " over" : ""), style: `height: ${Math.max(1, (d.minutes / top) * 100)}%`,
+      : el("div", { class: "bar" + (d.watching ? " watch" : d.allowed && d.minutes > d.allowed ? " over" : ""), style: `height: ${Math.max(1, (d.minutes / top) * 100)}%`,
           title: `${d.weekday}: ${d.minutes} min`, "aria-label": `${d.weekday}: ${d.minutes} minutes` })),
     ...(perDay ? [el("div", { class: "limit", style: `bottom: ${(perDay / top) * 100}%` })] : []));
   $("days").replaceChildren(...w.days.map((d, i) => el("span", {}, i === 6 ? "Today" : d.weekday)));
@@ -27,6 +27,17 @@ async function show() {
   $("passes").textContent = String(w.passes);
   $("clear").textContent = String(w.clearDays);
   $("clear-label").textContent = w.clearDays === 1 ? "day nothing had to close" : "days nothing had to close";
+  // After the watch week: the baseline, and the way to set limits from it.
+  const ready = new URLSearchParams(location.search).get("ready") === "1" || (state.watch && !watching(state));
+  if (ready && state.watch && !Object.keys(state.rules.kinds).length) {
+    const b = baseline(state, now);
+    $("ready-text").textContent = b.kinds.length
+      ? "A day, on average: " + b.kinds.map((k) => `${k.label.toLowerCase()} ${k.perDay} min`).join(", ") + ". Nothing was blocked. Limits start from half of that, and you can change them."
+      : "No time on these sites this week. You can still set limits for the kinds you want to keep an eye on.";
+    $("ready").classList.remove("hidden");
+    ask("watchShown").catch(() => {});
+  }
+  if (state.watch && watching(state)) $("limit-label").textContent = "Watch week: nothing blocked";
   $("note").textContent = w.keptDays < 7
     ? "Kept on this device only. The week fills in from the day this version was installed."
     : "Kept on this device only.";

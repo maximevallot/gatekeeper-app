@@ -200,6 +200,12 @@ $("talk-link").append(chatIcon(), "Change something by talking");
 
 async function load() {
   got = await ask("state");
+  // During the watch week the rules wait: nothing is blocked until it ends or the user ends it.
+  if (got.state.watch && !got.state.watch.ended && got.now < got.state.watch.until && !$("watch-note")) {
+    const end = el("button", { class: "link", type: "button" }, "Set limits now");
+    end.addEventListener("click", () => { location.href = "welcome.html?after=watch"; });
+    $("daily").before(el("div", { class: "note", id: "watch-note" }, el("span", {}, `Watch week until ${when(got.state.watch.until)}: nothing is blocked yet.`), end));
+  }
   if (!warned) warned = warnings({ ...got, incognito: true }, $("daily")) >= 0; // private windows: shown in Settings
   renderKinds();
   renderSettings();

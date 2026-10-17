@@ -34,6 +34,11 @@ async function show() {
     $("change").onclick = (e) => { e.preventDefault(); openTab("welcome.html"); };
     return;
   }
+  if (t.watch) return showWatch(t);
+  if (t.watchReady) {
+    $("mode").textContent = "Your week is ready"; $("mode").className = "pill ok";
+    $("mode").onclick = () => openTab("week.html?ready=1");
+  }
   $("rings").replaceChildren(...(t.kinds.length ? t.kinds.map((k) => ring(k, t.reopensAt))
     : [el("p", { class: "lead", style: "grid-column: 1 / -1" }, "Nothing is watched yet.")]));
   $("goal").textContent = t.goal;
@@ -41,6 +46,25 @@ async function show() {
   if (blind && blind.length) { $("mode").textContent = "Check site access"; $("mode").className = "pill warn"; }
   else if (t.waiting) { $("mode").textContent = "Change tomorrow"; $("mode").className = "pill warn"; }
   $("change").replaceChildren(chatIcon(), "Change something");
+}
+
+// The watch week: minutes so far per kind, nothing blocked, and one tap to set limits now.
+function showWatch(t) {
+  $("mode").textContent = `Watch week · day ${t.watch.day} of ${t.watch.of}`;
+  $("mode").className = "pill ok";
+  const top = Math.max(30, ...t.watch.kinds.map((k) => k.used));
+  $("rings").replaceChildren(...t.watch.kinds.slice(0, 6).map((k) => el("div", { class: "ring", "data-kind": k.kind },
+    el("div", { class: "dial" },
+      svg("svg", { width: 96, height: 96, viewBox: "0 0 96 96", role: "img", "aria-label": `${k.label}: ${k.used} minutes today` },
+        svg("circle", { cx: 48, cy: 48, r: 40, fill: "none", class: "track", "stroke-width": 10 }),
+        ...(k.used ? [svg("circle", { cx: 48, cy: 48, r: 40, fill: "none", class: "fill", "stroke-width": 10, "stroke-linecap": "round",
+          "stroke-dasharray": `${Math.max(0.5, (k.used / top) * C)} ${C}`, transform: "rotate(-90 48 48)" })] : [])),
+      el("div", { class: "count" }, String(k.used))),
+    el("div", { class: "label" }, k.short), el("div", { class: "state" }, "min today"))));
+  $("goal").textContent = t.goal;
+  $("goal-card").classList.toggle("hidden", !t.goal);
+  $("change").replaceChildren("Set limits now");
+  $("change").onclick = async (e) => { e.preventDefault(); openTab("welcome.html?after=watch"); };
 }
 
 $("all-rules").addEventListener("click", (e) => { e.preventDefault(); openTab("rules.html"); });

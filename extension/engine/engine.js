@@ -191,7 +191,62 @@ function daySummary(s) {
   const seconds = Object.values(s.usage.seconds || {}).reduce((a, b) => a + b, 0);
   const allowed = Object.values(s.rules.kinds || {}).reduce((a, k) => a + (k.minutes || 0), 0);
   const passes = Object.values(s.usage.passes || {}).reduce((a, b) => a + b, 0);
-  return { day: s.usage.day, minutes: Math.round(seconds / 60), allowed, gates: s.usage.gates || 0, passes };
+  const kinds = {};
+  for (const k of Object.keys(KINDS)) if (s.usage.seconds[k]) kinds[k] = Math.round(s.usage.seconds[k] / 60);
+  // A watch day is one that lay inside the watch week, judged by its own dates, not by when it was closed.
+  const w = s.watch;
+  const inWatch = !!w && s.usage.endsAt > w.from && s.usage.endsAt <= w.until;
+  return { day: s.usage.day, minutes: Math.round(seconds / 60), allowed, gates: s.usage.gates || 0, passes, kinds, watching: inWatch || undefined };
+}
+
+// ---------- the watch week ----------
+// A new install can begin with a week of only counting: every kind is counted, nothing is blocked. The
+// week it records is the "as is" baseline the user then sets rules against. One tap skips it.
+
+export const WATCH_DAYS = 7;
+
+/** Whether the watch week is on now. */
+export function watching(state) {
+  const w = state.watch;
+  return !!w && !w.ended && (state.clock ? state.clock.floor : 0) < w.until;
+}
+
+/** Begin the watch week: seven whole days, ending at the morning hour after the seventh. */
+export function startWatch(state, { goal } = {}, now) {
+  const s = rollover(state, now);
+  const t = s.clock.floor;
+  const until = nextDayStart(t + (WATCH_DAYS - 1) * 86400e3, s.rules.dayStart);
+  return { ...setGoal(s, goal === undefined ? s.goal : goal), setupDone: true, watch: { from: t, until } };
+}
+
+/** End the watch week now (the user skipped the rest, or set rules). */
+export function endWatch(state, now) {
+  const s = rollover(state, now);
+  return s.watch ? { ...s, watch: { ...s.watch, until: Math.min(s.watch.until, s.clock.floor), ended: true } } : s;
+}
+
+/** The watch week has ended and its summary has not been shown yet. */
+export function watchReady(state) {
+  return !!state.watch && !watching(state) && !state.watch.shown;
+}
+
+export function markWatchShown(state) {
+  return state.watch ? { ...state, watch: { ...state.watch, shown: true } } : state;
+}
+
+/** Minutes a day per kind over the recorded days, and a starting limit for each: half, in steps of 5. */
+export function baseline(state, now) {
+  const s = rollover(state, now);
+  const days = (s.history || []).filter((h) => !s.watch || (h.day >= dayKey(s.watch.from, s.rules.dayStart)));
+  const n = Math.max(1, days.length);
+  const out = [];
+  for (const k of Object.keys(KINDS)) {
+    const total = days.reduce((a, d) => a + ((d.kinds || {})[k] || 0), 0);
+    if (!total) continue;
+    const perDay = Math.round(total / n);
+    out.push({ kind: k, label: label(k), perDay, suggested: Math.max(5, Math.round(perDay / 2 / 5) * 5) });
+  }
+  return { days: days.length, kinds: out.sort((a, b) => b.perDay - a.perDay) };
 }
 
 /** A gate was shown for a closed site: one more for the week's count. */
@@ -235,7 +290,11 @@ export function todaySummary(state, now) {
     const status = minutes === 0 ? "closed" : used >= minutes * 60 ? "spent" : "open";
     return { kind: k, label: label(k), short: SHORT[k] || label(k), minutes, left, status, fraction: minutes ? Math.max(0, (minutes * 60 - used) / (minutes * 60)) : 0 };
   });
-  return { kinds, goal: s.goal || "", reopensAt: s.usage.endsAt, setupDone: !!s.setupDone, waiting: !!s.pending };
+  const watch = watching(s) ? {
+    day: Math.min(WATCH_DAYS, Math.floor((s.clock.floor - s.watch.from) / 86400e3) + 1), of: WATCH_DAYS, until: s.watch.until,
+    kinds: Object.keys(KINDS).map((k) => ({ kind: k, label: label(k), short: SHORT[k] || label(k), used: Math.floor(usedSeconds(s, k) / 60) })),
+  } : null;
+  return { kinds, goal: s.goal || "", reopensAt: s.usage.endsAt, setupDone: !!s.setupDone, waiting: !!s.pending, watch, watchReady: watchReady(s) };
 }
 
 const usedSeconds = (s, kind) => s.usage.seconds[kind] || 0;
@@ -254,6 +313,11 @@ function passFor(s, url, kind) {
  */
 export function decide(state, { url, title = "", now }) {
   const s = rollover(state, now);
+  if (watching(s)) {
+    // The watch week counts every kind and blocks nothing.
+    const kind = kindOf(s, url);
+    return KINDS[kind] ? { verdict: "allow", kind, bucket: kind, label: label(kind), watched: true, watching: true } : { verdict: "allow", kind, watched: false };
+  }
   const video = videoDecision(s, url, title);
   if (video) return video;
   const kind = kindOf(s, url);
@@ -415,6 +479,7 @@ export function sortFailed(state, domain, now) {
 /** Kinds closed right now: 0 minutes, or today's budget spent. */
 export function closedKinds(state, now) {
   const s = rollover(state, now);
+  if (watching(s)) return [];
   return Object.keys(s.rules.kinds).filter((k) => s.rules.kinds[k].minutes === 0 || usedSeconds(s, k) >= s.rules.kinds[k].minutes * 60);
 }
 
@@ -570,6 +635,7 @@ export function proposeRules(state, next, now) {
 
 /** The welcome tab's answers. The first rules only add limits, so they all apply at once. */
 export function completeSetup(state, { kinds, goal }, now) {
+  if (watching(rollover(state, now))) state = endWatch(state, now); // setting rules ends the watch week
   const rules = { ...state.rules, kinds: {} };
   for (const [k, m] of Object.entries(kinds)) rules.kinds[k] = { minutes: clampMinutes(m) };
   const r = proposeRules(state, rules, now);

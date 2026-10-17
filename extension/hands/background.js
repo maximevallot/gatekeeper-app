@@ -18,6 +18,7 @@ let queue = Promise.resolve();
 let blocking = null; // the enforcement last written into the browser's rules
 let closedBefore = ""; // the closed domains at the last sweep of open tabs
 let blind = []; // watched domains the browser does not let Gatekeeper see
+let watchTabOpened = false; // the end-of-watch-week tab, opened once per worker
 let lastTick = Date.now();
 
 async function load() {
@@ -116,6 +117,11 @@ async function tick() {
   }
   const url = front;
   if (out.sort) sortSite(out.sort, tab.title || "");
+  // The watch week just ended: show the week once, with the way to set limits from it.
+  if (engine.watchReady(state) && !watchTabOpened) {
+    watchTabOpened = true;
+    chrome.tabs.create({ url: chrome.runtime.getURL("pages/week.html?ready=1") });
+  }
   if (out.judge) judgeVideo(out.judge);
   const d = out.decision;
   if (d.verdict !== "allow") {
@@ -237,6 +243,19 @@ const handlers = {
     if (!r.ok) return { failed: r.error || "unreachable", scope: r.scope };
     const preview = engine.chatPreview(await load(), r.data, Date.now());
     return preview.error ? { failed: preview.error } : preview;
+  },
+  // The watch week: start it from the welcome tab, end it early with one tap, and mark its summary seen.
+  async watch({ goal }) {
+    await update((s) => ({ state: engine.startWatch(s, { goal }, Date.now()) }));
+    return { ok: true };
+  },
+  async endWatch() {
+    await update((s) => ({ state: engine.endWatch(s, Date.now()) }));
+    return { ok: true };
+  },
+  async watchShown() {
+    await update((s) => ({ state: engine.markWatchShown(s) }));
+    return { ok: true };
   },
   async setup({ kinds, goal }) {
     const out = await update((s) => engine.completeSetup(s, { kinds, goal }, Date.now()));

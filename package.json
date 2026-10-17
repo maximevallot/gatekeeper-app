@@ -8,6 +8,7 @@
     "e2e": "node test/e2e/run.mjs",
     "e2e:stale": "node test/e2e/stale.mjs",
     "e2e:qa": "node test/e2e/qa.mjs",
-    "e2e:videos": "node test/e2e/videos.mjs"
+    "e2e:videos": "node test/e2e/videos.mjs",
+    "e2e:watch": "node test/e2e/watch.mjs"
   }
 }

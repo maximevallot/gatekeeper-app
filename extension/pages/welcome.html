@@ -9,11 +9,27 @@
 </head>
 <body>
 <main class="page narrow">
-  <div id="ask" style="display: flex; flex-direction: column; gap: 32px">
+  <div id="watch" style="display: flex; flex-direction: column; gap: 32px">
     <div class="section" style="gap: 8px">
       <div class="eyebrow">Gatekeeper</div>
-      <h1 class="title">Set it up in a minute</h1>
-      <p class="lead">Three questions. You can change everything later by just telling Gatekeeper.</p>
+      <h1 class="title">First, a week of just watching</h1>
+      <p class="lead">For 7 days Gatekeeper counts your time on social media, video, games, news and shopping, and blocks nothing. Then you see your week and set limits from it.</p>
+    </div>
+    <div class="section" style="gap: 12px">
+      <label for="watch-goal" style="font-size: 18px; font-weight: 600">What are you working toward?</label>
+      <input class="field" id="watch-goal" maxlength="300" placeholder="Finish problem set 4 by Thursday" autocomplete="off">
+    </div>
+    <div class="row" style="padding: 0">
+      <button class="link" type="button" id="skip-watch">Skip: set limits now</button>
+      <button class="btn" type="button" id="start-watch">Start watching</button>
+    </div>
+  </div>
+
+  <div id="ask" class="hidden" style="display: flex; flex-direction: column; gap: 32px">
+    <div class="section" style="gap: 8px">
+      <div class="eyebrow">Gatekeeper</div>
+      <h1 class="title" id="ask-title">Set it up in a minute</h1>
+      <p class="lead" id="ask-lead">Three questions. You can change everything later by just telling Gatekeeper.</p>
     </div>
 
     <div class="section" style="gap: 12px">
@@ -52,7 +68,7 @@
   <div id="done" class="hidden" style="display: flex; flex-direction: column; gap: 24px">
     <div class="section" style="gap: 8px">
       <div class="eyebrow">Gatekeeper</div>
-      <h1 class="title">You're set</h1>
+      <h1 class="title" id="done-title">You're set</h1>
       <p class="lead" id="summary"></p>
     </div>
     <div class="card rowblock" id="private-card">

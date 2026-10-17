@@ -160,6 +160,7 @@ body.popup { background: var(--surface); }
 .bars { height: 180px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 14px; align-items: end; border-bottom: 1px solid var(--line); position: relative; }
 .bars .bar { border-radius: 8px 8px 0 0; background: var(--accent); min-height: 2px; }
 .bars .bar.over { background: var(--closed); }
+.bars .bar.watch { background: var(--accent-pale); }
 .bars .bar.none { background: none; border: 1px dashed var(--line); border-bottom: 0; height: 8px; }
 .bars .limit { position: absolute; left: 0; right: 0; border-top: 2px dashed var(--accent-pale); }
 .days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 14px; font-size: 13px; color: var(--muted); text-align: center; }
