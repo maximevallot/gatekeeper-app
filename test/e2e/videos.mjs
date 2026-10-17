@@ -13,6 +13,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startMock } from "./mock-anthropic.mjs";
+import { CONSENT } from "../../extension/engine/engine.js";
 import { connect, sleep } from "./cdp.mjs";
 
 const RELAY_DIR = process.env.GATEKEEPER_RELAY_DIR || join(homedir(), "gatekeeper-relay");
@@ -118,7 +119,7 @@ try {
   await p.evaluate(`document.getElementById('apply').click()`);
   await sleep(1200);
   s = await st();
-  check("Apply made two video rules and recorded the yes to judging", s.rules.videos.length === 2 && s.consent.help === 1, { videos: s.rules.videos, consent: s.consent });
+  check("Apply made two video rules and recorded the yes to judging", s.rules.videos.length === 2 && s.consent.help === CONSENT.help, { videos: s.rules.videos, consent: s.consent });
   await p.send("Page.navigate", { url: rulesUrl }); await sleep(1200);
   const listed = await p.evaluate(`(document.getElementById('video-rules') || {}).innerText || ''`);
   check("the rules page lists them as chips under Video", /video games.*closed/i.test(listed) && /educational.*free/i.test(listed), listed);

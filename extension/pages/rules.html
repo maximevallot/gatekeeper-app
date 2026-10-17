@@ -16,6 +16,18 @@
 
   <a class="btn wide" href="talk.html?from=rules" id="talk-link"></a>
 
+  <div class="card rowblock hidden" id="loosen-card">
+    <div class="name" id="loosen-title">To loosen this, tell Gatekeeper why</div>
+    <ul class="sub" id="loosen-changes" style="margin: 0; padding-left: 18px"></ul>
+    <div class="log" id="loosen-log"></div>
+    <form class="inline" id="loosen-form">
+      <label for="loosen-message" class="sr">Why you need this</label>
+      <input class="field" id="loosen-message" maxlength="500" placeholder="What changed, in one go" autocomplete="off">
+      <button class="btn" type="submit" id="loosen-send">Ask</button>
+    </form>
+    <div class="small muted">A yes applies tomorrow morning. Your reason and the change are sent to Claude.</div>
+  </div>
+
   <div class="card rowblock hidden" id="exam-row">
     <div class="row" style="padding: 0">
       <div class="stack"><div class="name" id="exam-title"></div><div class="sub" id="exam-goal"></div></div>

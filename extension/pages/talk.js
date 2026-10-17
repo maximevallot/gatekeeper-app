@@ -14,6 +14,7 @@ if (inTab) {
 let history = []; // this conversation: { role: "user" | "gatekeeper", text }, kept only on this screen
 let helpOn = false;
 let card = null;
+let reasonFor = false; // after Apply with a loosening: the next message is the reason, for the agent
 
 function say(text, me) {
   const b = el("div", { class: "bubble" + (me ? " me" : "") }, text);
@@ -34,6 +35,7 @@ $("chat-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const text = $("chat-message").value.trim();
   if (!text) return;
+  if (reasonFor) { sendReason(text); return; }
   if (!helpOn) {
     // Nothing leaves the browser before this yes.
     $("chat-consent").classList.remove("hidden");
@@ -83,6 +85,19 @@ async function send(text) {
   if (!r.question) showCard(r);
 }
 
+async function sendReason(text) {
+  say(text, true);
+  $("chat-message").value = "";
+  const r = await ask("loosen", { message: text }).catch(() => ({ decision: "unavailable" }));
+  if (r.decision === "ask") { say(r.reply); return; }
+  reasonFor = false;
+  $("chat-message").placeholder = "Say it in your words";
+  if (r.decision === "allow") say(`${r.reply} It applies tomorrow at ${clock(r.from)}.`);
+  else if (r.decision === "deny") say(`${r.reply} You can ask again tomorrow.`);
+  else if (r.decision === "unavailable") say("I couldn't be reached, so it waits for the morning as usual.");
+  else say("Nothing was sent.");
+}
+
 function line(text, later, from) {
   return el("div", { class: "line" },
     el("span", { class: "icon " + (later ? "later" : "now") }, later ? clockIcon(16) : lockIcon(16, "")),
@@ -109,6 +124,14 @@ function showCard(p) {
     }
     const r = await ask("propose", { rules: p.rules });
     card.remove(); card = null;
+    if (r.refused === "asked_today") { say("I said no to that today. You can ask again tomorrow."); return; }
+    if (r.needsOk) {
+      say(`${r.now.length ? "The stricter part applies now. " : ""}To loosen the rest, tell me why: what changed?`);
+      reasonFor = true;
+      $("chat-message").placeholder = "Your reason, in one go";
+      $("chat-message").focus();
+      return;
+    }
     say(r.later && r.later.length ? `Done. ${r.now.length ? "Some of it applies now; the rest " : "It "}applies tomorrow at ${clock(r.from)}.` : "Done. It applies now.");
   });
 }

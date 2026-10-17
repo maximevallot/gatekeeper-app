@@ -34,6 +34,12 @@ function answer(body) {
     return { reply: "", question: "Which sites or videos, and how many minutes a day?", diff: [] };
   }
 const message = /<message>\n([\s\S]*)\n<\/message>/.exec(user)?.[1] ?? "";
+  if (body.system?.includes("You hold the key to loosening")) {
+    // The key to loosening: a lecture is a reason, "school" gets one question, anything else is a no.
+    if (/lecture/i.test(message)) return { decision: "allow", reply: "OK, from tomorrow morning." };
+    if (/school/i.test(message) && /earlier question: none/.test(user)) return { decision: "ask", reply: "What changed for school?" };
+    return { decision: "deny", reply: "The rule stays." };
+  }
   if (/lecture/i.test(message)) return { decision: "allow", minutes: 30, reply: "Go get the lecture recording." };
   if (/class/i.test(message)) return { decision: "ask", minutes: 0, reply: "Which class, and what do you need?" };
   return { decision: "deny", minutes: 0, reply: "No." };

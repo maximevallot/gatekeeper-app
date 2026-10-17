@@ -23,7 +23,9 @@ function saved(text) {
 async function propose(rules, extra = {}) {
   try {
     const r = await ask("propose", { rules, ...extra });
-    saved(r.later && r.later.length ? `Saved. Loosening applies ${when(r.from)}.` : "Saved");
+    saved(r.refused === "asked_today" ? "Gatekeeper said no to that today. Ask again tomorrow."
+      : r.needsOk ? "Saved. To loosen it, tell Gatekeeper why."
+      : r.later && r.later.length ? `Saved. Loosening applies ${when(r.from)}.` : "Saved");
   } catch {
     saved("Not saved: Gatekeeper's background didn't answer");
   }
@@ -64,8 +66,9 @@ function pendingRow(kind, inForce, want) {
     return el("div", { class: "note", "data-pending": kind }, el("span", {}, `Stops being watched ${when(now)}`),
       el("button", { class: "link", type: "button", onclick: () => keep(kind, inForce) }, "Keep watching"));
   }
+  const asking = got.state.pending && got.state.pending.ok === false;
   if (inForce && want && want.minutes !== inForce.minutes) {
-    return el("div", { class: "note", "data-pending": kind }, el("span", {}, `Going to ${want.minutes} min ${when(now)}`),
+    return el("div", { class: "note", "data-pending": kind }, el("span", {}, asking ? `Going to ${want.minutes} min once Gatekeeper agrees, from the next morning` : `Going to ${want.minutes} min ${when(now)}`),
       el("button", { class: "link", type: "button", onclick: () => keep(kind, inForce) }, `Keep ${inForce.minutes === 0 ? "closed" : inForce.minutes}`));
   }
   return null;
@@ -221,9 +224,41 @@ $("exam-end-open").addEventListener("click", () => { $("exam-form").classList.to
 $("exam-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const r = await ask("endExam", { sentence: $("exam-sentence").value }).catch(() => ({ refused: "unreachable" }));
-  saved(r.ok ? "Exam mode is off" : r.refused === "wrong_sentence" ? "That isn't the sentence; exam mode stays on" : "Not saved");
+  saved(r.needsOk ? "To end it early, tell Gatekeeper why" : r.ok ? "Exam mode is off"
+    : r.refused === "wrong_sentence" ? "That isn't the sentence; exam mode stays on"
+    : r.refused === "asked_today" ? "Gatekeeper said no to that today. Ask again tomorrow." : "Not saved");
   $("exam-sentence").value = "";
   load();
+});
+
+// ---------- the key to loosening ----------
+
+function renderLoosen() {
+  const l = got.state.loosen;
+  $("loosen-card").classList.toggle("hidden", !l);
+  if (!l) return;
+  $("loosen-title").textContent = l.kind === "exam" ? "To end exam mode early, tell Gatekeeper why" : "To loosen this, tell Gatekeeper why";
+  $("loosen-changes").replaceChildren(...l.changes.map((c) => el("li", {}, c)));
+}
+function loosenSay(text, me) {
+  $("loosen-log").append(el("div", { class: "bubble" + (me ? " me" : "") }, text));
+}
+$("loosen-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = $("loosen-message").value.trim();
+  if (!text) return;
+  loosenSay(text, true);
+  $("loosen-message").value = "";
+  $("loosen-send").disabled = true;
+  const r = await ask("loosen", { message: text }).catch(() => ({ decision: "unavailable" }));
+  $("loosen-send").disabled = false;
+  if (r.decision === "allow") { loosenSay(r.reply); saved(`Agreed: it applies ${when(r.from)}`); }
+  else if (r.decision === "ask") { loosenSay(r.reply); $("loosen-message").focus(); return; }
+  else if (r.decision === "deny") { loosenSay(r.reply); saved("The rule stays. You can ask again tomorrow."); }
+  else if (r.decision === "unavailable") saved("Couldn't reach Gatekeeper's agent, so it waits for the morning as usual");
+  else saved("Nothing was sent");
+  await load();
+  $("loosen-card").classList.add("hidden");
 });
 
 // ---------- the Mac app ----------
@@ -261,6 +296,7 @@ async function load() {
   renderSettings();
   renderExam();
   renderMac();
+  renderLoosen();
 }
 
 checkWorker();

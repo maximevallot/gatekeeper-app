@@ -300,7 +300,23 @@ const handlers = {
   async endExam({ sentence }) {
     const out = await update((s) => engine.endExam(s, sentence, Date.now()));
     macSync(true);
-    return { ok: !out.refused, refused: out.refused };
+    return { ok: !out.refused, refused: out.refused, needsOk: !!out.needsOk };
+  },
+  // The reason for a loosening, to the agent who holds the key. Out of reach: the morning rule, as before.
+  async loosen({ message }) {
+    const req = engine.loosenRequest(await load(), { message, now: Date.now() });
+    if (req.refused) return { decision: "refused", reason: req.refused };
+    const r = await callRelay("/loosen", req.payload);
+    if (!r.ok) {
+      await update((s) => engine.loosenUnavailable(s, { message, error: r.error, now: Date.now() }));
+      return { decision: "unavailable", error: r.error };
+    }
+    const out = await update((s) => engine.applyLoosenAnswer(s, { answer: r.data, message, now: Date.now() }));
+    if (out.result.decision === "error") {
+      await update((s) => engine.loosenUnavailable(s, { message, error: "bad_answer", now: Date.now() }));
+      return { decision: "unavailable", error: "bad_answer" };
+    }
+    return out.result;
   },
   async mac() {
     await macSync(true);
@@ -327,7 +343,7 @@ const handlers = {
       const r = engine.proposeRules(s, rules, Date.now());
       return { ...r, state: goal === undefined ? r.state : engine.setGoal(r.state, goal) };
     });
-    return { now: out.now, later: out.later, from: out.from };
+    return { now: out.now, later: out.later, from: out.from, needsOk: !!out.needsOk, refused: out.refused };
   },
 };
 

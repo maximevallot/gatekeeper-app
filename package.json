@@ -10,6 +10,7 @@
     "e2e:qa": "node test/e2e/qa.mjs",
     "e2e:videos": "node test/e2e/videos.mjs",
     "e2e:watch": "node test/e2e/watch.mjs",
-    "e2e:mac": "node test/e2e/mac.mjs"
+    "e2e:mac": "node test/e2e/mac.mjs",
+    "e2e:loosen": "node test/e2e/loosen.mjs"
   }
 }
