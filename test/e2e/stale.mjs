@@ -29,6 +29,9 @@ try {
   const manifest = JSON.parse(readFileSync(join(ext, "manifest.json"), "utf8"));
   manifest.background.service_worker = "old/hands/background.js";
   delete manifest.action.default_popup; // 0304580 had no popup
+  // The Mac app's permission already granted, as after "Allow" while the old worker still runs.
+  manifest.permissions.push("nativeMessaging");
+  manifest.optional_permissions = [];
   writeFileSync(join(ext, "manifest.json"), JSON.stringify(manifest));
   browser = spawn(BROWSER, ["--headless=new", `--user-data-dir=${join(work, "profile")}`, "--no-first-run", "--no-default-browser-check",
     "--disable-features=DisableLoadExtensionCommandLineSwitch", `--load-extension=${ext}`, `--remote-debugging-port=${process.env.CDP_PORT || 9334}`, "about:blank"],
@@ -45,6 +48,9 @@ try {
   await p.evaluate(`document.getElementById('help').click()`); await sleep(1500);
   check("a switch the old worker did not save goes back to unticked", (await p.evaluate(`document.getElementById('help').checked`)) === false);
   check("and the page says it was not saved", /Not saved/.test(await p.evaluate(`document.getElementById('saved').textContent`)));
+  // The Mac app switch: granted by the browser, but the old worker cannot use it yet.
+  check("the Mac app switch shows the grant, not Off", (await p.evaluate(`document.getElementById('mac').checked`)) === true);
+  check("and says a reload connects it", /Reload Gatekeeper once/.test(await p.evaluate(`document.getElementById('mac-sub').textContent`)));
 } catch (e) {
   console.log("FAIL", e.message); failures++;
 }

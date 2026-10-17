@@ -230,7 +230,9 @@ $("exam-form").addEventListener("submit", async (e) => {
 
 const NATIVE = { permissions: ["nativeMessaging"] };
 async function renderMac() {
-  const m = await ask("mac").catch(() => ({ permitted: false }));
+  // If the background doesn't answer (an old worker beside these pages), say what the browser has granted,
+  // and that a reload connects it, rather than showing the switch off.
+  const m = await ask("mac").catch(async () => ({ permitted: await chrome.permissions.contains(NATIVE).catch(() => false), error: "reload_needed" }));
   $("mac").checked = !!m.permitted;
   $("mac-sub").textContent = !m.permitted
     ? "Off. With Gatekeeper for Mac on, your goal, each kind's minutes today and exam mode go to a file on this Mac that apps you run can read. Nothing goes to a server."
