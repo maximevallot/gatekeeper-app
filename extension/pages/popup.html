@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gatekeeper · Today</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="popup">
+<main class="panel" id="today">
+  <div class="row" style="padding: 0">
+    <h1 style="font-size: 22px; font-weight: 800">Today</h1>
+    <span class="pill" id="mode">Normal day</span>
+  </div>
+  <div class="rings" id="rings"></div>
+  <div class="soft hidden" id="goal-card" style="display: flex; gap: 12px; align-items: center">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="flex: none"><circle cx="12" cy="12" r="9" fill="none" stroke="var(--accent)" stroke-width="2"></circle><circle cx="12" cy="12" r="4" fill="none" stroke="var(--accent)" stroke-width="2"></circle></svg>
+    <div id="goal" style="font-size: 15px; font-weight: 500"></div>
+  </div>
+  <div style="flex-grow: 1"></div>
+  <a class="btn wide" id="change" href="talk.html"></a>
+  <div class="row" style="padding: 0; font-size: 14px">
+    <a href="#" id="all-rules">All rules</a>
+    <a href="#" id="your-week">Your week</a>
+  </div>
+</main>
+<script type="module" src="popup.js"></script>
+</body>
+</html>

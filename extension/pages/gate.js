@@ -1,21 +1,23 @@
 // The gate. It says what is closed, how much was used, when it reopens, and the user's own sentence about
 // what they are working toward. One box takes a real need to Claude through the relay: allow opens the
 // site for a few minutes, ask allows one follow-up, and no, or any error, keeps it shut.
-import { ask, when, el, checkWorker, warnings } from "./common.js";
+import { ask, when, el, clock, checkWorker, warnings, whatsSent, whatsSentToggle } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 const url = location.hash.slice(1); // the page that was stopped, exactly as it was asked for
 
 let waits = 0;
+let counted = false;
 async function show() {
   let host = "";
   try { host = new URL(url).hostname.replace(/^www\./, ""); } catch {}
-  const decided = await ask("decide", { url });
+  const decided = await ask("decide", { url, count: !counted });
+  counted = true;
   const { decision: d, goal } = decided;
   if (decided.judging && waits++ < 6) {
     // A video stopped before it loaded, being checked against the video rules: ask again in a moment.
     document.title = "Checking this video";
-    $("headline").textContent = "Checking this video against your video rules…";
+    $("headline").textContent = "Checking this video…";
     $("closed").classList.remove("hidden");
     setTimeout(show, 1500);
     return;
@@ -26,20 +28,19 @@ async function show() {
   }
   document.title = `${d.label || host} closed`;
   $("site").textContent = d.label ? `${host} · ${d.label}` : host;
+  const until = `Closed until ${when(d.reopensAt).replace(/^(today|tomorrow) at (.*)$/, "$2 $1")}`;
   if (d.video) {
     // A video rule, not a kind: the gate does not argue with it; the rules page changes it.
-    const rule = `Your rule on YouTube videos about ${d.video.name}${d.video.except ? `, except ${d.video.except}` : ""}`;
-    $("headline").textContent = d.verdict === "block" ? "This video is closed" : "Closed for today";
-    $("used").textContent = d.verdict === "block"
-      ? `${rule}, closes it. To change that rule, use your rules page; loosening takes effect the next morning.`
-      : `${rule}: you used its ${d.budgetMinutes} minutes. It opens again ${when(d.reopensAt)}.`;
+    const rule = `Your rule on ${d.video.name} videos${d.video.except ? `, except ${d.video.except}` : ""}`;
+    $("headline").textContent = d.verdict === "block" ? "This video is closed" : until;
+    $("used").textContent = d.verdict === "block" ? `${rule} closes it.` : `${rule}: you used its ${d.budgetMinutes} minutes today.`;
   } else if (d.verdict === "block") {
     $("headline").textContent = "Closed all day";
-    $("used").textContent = `You set ${d.label.toLowerCase()} to 0 minutes. It stays closed until you change that rule, which takes effect the next morning.`;
+    $("used").textContent = `You set ${d.label.toLowerCase()} to 0 minutes.`;
   } else {
-    $("headline").textContent = "Closed for today";
+    $("headline").textContent = until;
     const m = d.budgetMinutes;
-    $("used").textContent = `You used your ${m} minute${m === 1 ? "" : "s"}. It opens again ${when(d.reopensAt)}.`;
+    $("used").textContent = `You used your ${m} minute${m === 1 ? "" : "s"} of ${d.label.toLowerCase()} today.`;
   }
   $("goal").textContent = goal || "";
   $("goal-box").classList.toggle("hidden", !goal);
@@ -53,30 +54,28 @@ async function show() {
 }
 
 let talk = { on: false };
-const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 function say(text, me) {
-  $("log").append(el("div", { class: "msg" + (me ? " me" : "") }, text));
+  $("log").append(el("div", { class: "bubble" + (me ? " me" : "") }, text));
 }
+
+const sent = whatsSentToggle();
+$("sent-line").append(" ", sent.link);
+$("sent-line").after(sent.list);
+$("consent-text").append(whatsSent());
 
 function shut(text) {
   if (text) say(text);
   $("form").classList.add("hidden");
 }
 
-$("message").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("form").requestSubmit(); }
-});
 
 $("form").addEventListener("submit", (e) => {
   e.preventDefault();
   const text = $("message").value.trim();
   if (!text) return;
   if (!talk.on) {
-    // Nothing leaves the browser before this yes.
-    $("consent-text").textContent = `To answer, Gatekeeper sends ${talk.host}, that it is ${talk.kind.toLowerCase()}, ` +
-      "today's minutes and budget, your goal sentence, what you typed and a random install number to Gatekeeper's relay, which asks Anthropic's Claude " +
-      "and keeps none of it. Nothing else leaves this browser. You can turn this off in your rules.";
+    // Nothing leaves the browser before this yes, to the full list of what Claude help sends.
     $("consent").classList.remove("hidden");
     $("form").classList.add("hidden");
     return;
@@ -85,7 +84,7 @@ $("form").addEventListener("submit", (e) => {
 });
 
 $("consent-yes").addEventListener("click", async () => {
-  const r = await ask("consent", { talk: true }).catch(() => null);
+  const r = await ask("consent", { help: true }).catch(() => null);
   if (!r || !r.talk) {
     $("consent").classList.add("hidden");
     shut("Can't reach the gate right now, so it stays shut.");

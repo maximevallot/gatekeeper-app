@@ -186,8 +186,12 @@ const handlers = {
     const incognito = await chrome.extension.isAllowedIncognitoAccess();
     return { state: s, now: Date.now(), closed: engine.closedKinds(s, Date.now()), blind, incognito, consent: engine.consentStatus(s) };
   },
-  async decide({ url }) {
-    await update((s) => ({ state: engine.rollover(s, Date.now()) }));
+  async decide({ url, count }) {
+    // `count`: the gate page's first look at a closed site, one more "time the gate held" for the week.
+    await update((s) => {
+      const r = engine.rollover(s, Date.now());
+      return { state: count && engine.decide(r, { url, now: Date.now() }).verdict !== "allow" ? engine.noteGate(r, Date.now()) : r };
+    });
     // A video stopped before it loaded, not judged yet: judge it now; the gate asks again in a moment.
     const judging = engine.needsJudgment(state, url);
     if (judging) judgeVideo(videoKeyOf(url));
@@ -206,10 +210,13 @@ const handlers = {
     return out.result;
   },
   // The pages ask for the all-sites permission themselves, inside the click; this records the answer.
-  async consent({ talk, sorting, chat, judge }) {
+  async consent({ talk, sorting, chat, judge, help }) {
     if (sorting && !(await chrome.permissions.contains(ALL_SITES))) sorting = false;
+    const seeAll = await chrome.permissions.contains(ALL_SITES);
     await update((s) => {
       let n = s;
+      // The one "Claude help" switch; sorting comes with it only where the browser lets Gatekeeper see every site.
+      if (help !== undefined) n = engine.setHelp(n, help, { sorting: seeAll });
       if (talk !== undefined) n = engine.setTalk(n, talk);
       if (sorting !== undefined) n = engine.setSorting(n, sorting);
       if (chat !== undefined) n = engine.setConsent(n, "chat", chat);
@@ -219,6 +226,7 @@ const handlers = {
     return {
       talk: engine.consented(state, "talk"), sorting: engine.consented(state, "sorting") && state.sorting,
       chat: engine.consented(state, "chat"), judge: engine.consented(state, "judge"),
+      help: engine.consented(state, "help"),
     };
   },
   // One message in the rules chat. Nothing changes here: the answer comes back as a card to apply or not.
@@ -253,10 +261,7 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === "install") chrome.tabs.create({ url: chrome.runtime.getURL("pages/welcome.html") });
 });
 
-chrome.action.onClicked.addListener(async () => {
-  const s = await load();
-  chrome.tabs.create({ url: chrome.runtime.getURL(s.setupDone ? "pages/rules.html" : "pages/welcome.html") });
-});
+// The toolbar button opens pages/popup.html, Today (manifest action.default_popup).
 
 // Sorting needs to see every site; if the permission is taken away, sorting stops.
 // Access taken away from one watched site is caught by syncBlocking on the next tick.

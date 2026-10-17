@@ -26,7 +26,7 @@ const short = (u) => String(u).replace(/^chrome-extension:\/\/[a-z]+/, "ext:");
 
 function cleanup() {
   for (const c of children) try { c.kill(); } catch {}
-  rmSync(work, { recursive: true, force: true });
+  (() => { try { rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch {} })();
 }
 process.on("exit", cleanup);
 
@@ -71,25 +71,32 @@ try {
     { stdio: "ignore" });
   children.push(browser);
 
-  // The welcome tab: video and news closed all day (0 minutes), games 15 minutes, sorting on.
+  // The welcome tab: video, games and news at 15 minutes, Claude help off; then video and news closed all day
+  // with the rules page's steppers (closing applies at once).
   const p = await connect((t) => t.type === "page" && t.url.endsWith("/pages/welcome.html"));
   await sleep(600);
   await p.evaluate(`document.querySelector('.kind[data-kind=video]').click(); document.querySelector('.kind[data-kind=games]').click(); document.querySelector('.kind[data-kind=news]').click();`);
-  await p.evaluate(`(() => { for (const k of ['video', 'news']) { const i = document.querySelector('#budgets input[data-kind=' + k + ']'); i.value = '0'; i.dispatchEvent(new Event('input')); }
-    document.getElementById('goal').value = 'Finish problem set 4 by Thursday'; document.getElementById('sorting').click(); })()`);
-  await sleep(500);
+  await p.evaluate(`document.getElementById('goal').value = 'Finish problem set 4 by Thursday';`);
+  await sleep(300);
   await p.evaluate(`document.getElementById('start').click()`);
   await sleep(800);
   const done = await p.evaluate(`document.getElementById('done-privacy').textContent`);
-  check("M3: the done panel says what leaves the browser, not that nothing does", /unknown sites' names and titles/.test(done) && !/Nothing leaves/.test(done), done);
+  check("M3: with Claude help off, the done panel says nothing leaves the browser", /Nothing leaves this browser/.test(done), done);
   const sw = await connect((t) => t.type === "service_worker");
   const st = () => sw.evaluate(`chrome.storage.local.get('state').then(r => r.state)`);
+  const rulesUrl = (await sw.evaluate(`chrome.runtime.getURL("pages/rules.html")`));
+  await p.send("Page.enable");
+  await p.send("Page.navigate", { url: rulesUrl }); await sleep(1200);
+  for (const k of ["video", "news"]) {
+    for (let i = 0; i < 3; i++) { await p.evaluate(`document.querySelector('[data-kind=${k}] [data-step="-1"]').click()`); await sleep(120); }
+    await sleep(1200);
+  }
   let s = await st();
+  check("the steppers closed video and news at once", s.rules.kinds.video.minutes === 0 && s.rules.kinds.news.minutes === 0 && !s.pending, s.rules.kinds);
   check("first run made an installId", /^[0-9a-f-]{36}$/.test(s.installId), s.installId);
-  check("sorting is on and the gate's talking is still off", s.sorting === true && s.talk === false, { sorting: s.sorting, talk: s.talk });
+  check("nothing is switched on before a yes", !s.talk && !s.sorting && !(s.consent || {}).help, { talk: s.talk, sorting: s.sorting, consent: s.consent });
 
   // 1. The gate: vimeo is closed; ask for the lecture.
-  await p.send("Page.enable");
   await p.send("Page.navigate", { url: "https://vimeo.com/" });
   await sleep(2500);
   check("vimeo goes to the gate before it loads", short(await p.evaluate("location.href")).startsWith("ext:/pages/gate.html#https://vimeo.com/"), await p.evaluate("location.href"));
@@ -100,7 +107,7 @@ try {
     !(await p.evaluate(`document.getElementById('consent').classList.contains('hidden')`)) && mock.requests.length === relayCallsBefore);
   await p.evaluate(`document.getElementById('consent-yes').click()`);
   await sleep(1000);
-  const log = await p.evaluate(`[...document.querySelectorAll('#log .msg')].map(m => m.textContent)`);
+  const log = await p.evaluate(`[...document.querySelectorAll('#log .bubble')].map(m => m.textContent)`);
   check("the reply and the pass show at the gate", log.some((t) => /^Pass: 10 minutes/.test(t)), log);
   await sleep(2500);
   check("the page reopens", (await p.evaluate("location.href")).startsWith("https://vimeo.com/"), await p.evaluate("location.href"));
@@ -115,16 +122,18 @@ try {
 
   // The switches show what is saved, and survive a reload (the bug of 2026-10-16 was a page that looked
   // ticked while nothing was saved).
-  const rulesUrl = (await sw.evaluate(`chrome.runtime.getURL("pages/rules.html")`));
-  const switches = () => p.evaluate(`[document.getElementById('talk').checked, document.getElementById('sorting').checked, !!document.getElementById('stale')]`);
+  const switches = () => p.evaluate(`[document.getElementById('help').checked, !!document.getElementById('stale')]`);
   await p.send("Page.navigate", { url: rulesUrl }); await sleep(1000);
-  check("the rules page shows the yes given at the gate, and sorting on", JSON.stringify(await switches()) === "[true,true,false]", await switches());
-  await p.evaluate(`document.getElementById('talk').click()`); await sleep(600);
+  s = await st();
+  check("the yes at the gate turned Claude help on, sorting included", JSON.stringify(await switches()) === "[true,false]" && s.sorting === true, { switches: await switches(), sorting: s.sorting });
+  await p.evaluate(`document.getElementById('help').click()`); await sleep(800);
   await p.send("Page.reload"); await sleep(1000);
-  check("turning talk off survives a reload", JSON.stringify(await switches()) === "[false,true,false]", await switches());
-  await p.evaluate(`document.getElementById('talk').click()`); await sleep(600);
+  s = await st();
+  check("turning Claude help off survives a reload, and withdraws every yes", JSON.stringify(await switches()) === "[false,false]" && !s.talk && !s.sorting, { switches: await switches(), consent: s.consent });
+  await p.evaluate(`document.getElementById('help').click()`); await sleep(800);
   await p.send("Page.reload"); await sleep(1000);
-  check("and turning it back on does too", JSON.stringify(await switches()) === "[true,true,false]" && (await st()).talk === true, await switches());
+  s = await st();
+  check("and turning it back on does too", JSON.stringify(await switches()) === "[true,false]" && s.talk === true && s.sorting === true, await switches());
 
   // 2. Sorting: a minute on the unknown game.
   await p.send("Page.navigate", { url: GAME });
@@ -140,7 +149,7 @@ try {
   await p.send("Page.navigate", { url: "https://www.nytimes.com/" }); await sleep(2500);
   await p.evaluate(`document.getElementById('message').value = 'I need one article for class'; document.getElementById('form').requestSubmit();`);
   await sleep(2500);
-  const limit = await p.evaluate(`[...document.querySelectorAll('#log .msg')].map(m => m.textContent).join(' | ')`);
+  const limit = await p.evaluate(`[...document.querySelectorAll('#log .bubble')].map(m => m.textContent).join(' | ')`);
   check("M2: the daily limit says the gate has answered enough", /answered enough for today/.test(limit), limit);
 } catch (e) {
   console.log("FAIL", e.message);

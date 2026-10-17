@@ -3,35 +3,45 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Closed for today</title>
+  <title>Closed</title>
+  <script src="theme.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<main class="gate">
-  <div class="brand">Gatekeeper</div>
-  <div id="closed" class="hidden">
-    <div class="muted" id="site"></div>
-    <h1 id="headline"></h1>
-    <div class="meter"><div id="bar" style="width:100%"></div></div>
-    <p class="muted" id="used"></p>
-    <div class="goal" id="goal-box">
-      <div class="muted">What you said you're working toward</div>
-      <p id="goal"></p>
+<main class="page narrow" style="padding-top: 72px">
+  <div id="closed" class="hidden" style="display: flex; flex-direction: column; gap: 28px">
+    <div class="section">
+      <div class="muted" id="site" style="font-size: 15px"></div>
+      <h1 class="gate-title" id="headline"></h1>
+      <div class="lead" id="used"></div>
     </div>
-    <div id="talk">
-      <h2>Need it for something real?</h2>
+
+    <div class="goalcard" id="goal-box">
+      <div class="k">You said you're working toward</div>
+      <div class="v" id="goal"></div>
+    </div>
+
+    <div class="section" id="talk">
       <div class="log" id="log"></div>
-      <div id="consent" class="note hidden">
-        <p id="consent-text"></p>
-        <button class="primary" id="consent-yes" type="button">Yes, send it</button>
-        <button class="link" id="consent-no" type="button">No</button>
-      </div>
-      <form id="form" class="ask">
-        <textarea id="message" rows="2" maxlength="500" placeholder="Say what you need it for, in one go."></textarea>
-        <button class="primary" id="send">Send</button>
+      <form class="section" id="form" style="gap: 10px">
+        <label for="message" style="font-size: 17px; font-weight: 600">Need it for something real?</label>
+        <div class="inline">
+          <input class="field" id="message" maxlength="500" placeholder="Say why, in one go" autocomplete="off">
+          <button class="btn" id="send" type="submit">Ask</button>
+        </div>
+        <div class="small muted" id="sent-line">Claude may open it for a few minutes. Your message and this site are sent.</div>
       </form>
+      <div class="change hidden" id="consent">
+        <div style="font-size: 15px; font-weight: 600">Turn on Claude help to ask?</div>
+        <div id="consent-text"></div>
+        <div class="actions">
+          <button class="btn" type="button" id="consent-yes">Yes, turn it on</button>
+          <button class="btn ghost" type="button" id="consent-no">No</button>
+        </div>
+      </div>
     </div>
-    <p class="muted"><a href="rules.html" id="rules-link">Your rules</a>. A looser rule takes effect the next morning.</p>
+
+    <div class="small"><a href="rules.html" id="rules-link">Your rules</a></div>
   </div>
 </main>
 <script type="module" src="gate.js"></script>

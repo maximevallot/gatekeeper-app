@@ -1,285 +1,209 @@
+// Your rules, saved as you go. Every change goes through the engine's proposeRules: what tightens applies
+// now, what loosens waits for the morning and shows as an amber row with a way to keep today's number.
 import { KINDS, KIND_ORDER } from "../engine/catalog.js";
 import { DEFAULT_MINUTES, label } from "../engine/engine.js";
-import { videoName, videoMinutesText } from "../engine/videos.js";
-import { ask, el, when, checkWorker, warnings } from "./common.js";
+import { videoName } from "../engine/videos.js";
+import {
+  ask, el, when, clock, stepper, checkWorker, warnings, whatsSentToggle, chatIcon, privateToggle, extensionsPage,
+  getAppearance, setAppearance,
+} from "./common.js";
 
 const $ = (id) => document.getElementById(id);
-let draft = null; // the rules being edited: { kinds, sites, videos, dayStart }
-
+let got = null; // the background's last state reply
 let warned = false;
-async function load() {
-  const got = await ask("state");
-  const { state, now } = got;
-  if (!warned) warned = warnings(got, document.querySelector("h1").nextElementSibling.nextElementSibling) >= 0;
-  draft = structuredClone(state.pending ? state.pending.rules : state.rules);
-  $("goal").value = state.goal || "";
-  renderPending(state, now);
-  renderKinds(state);
-  renderSites();
-  renderVideos(state);
+
+const wanted = () => structuredClone(got.state.pending ? got.state.pending.rules : got.state.rules);
+
+function saved(text) {
+  $("saved").textContent = text;
+  clearTimeout(saved.t);
+  saved.t = setTimeout(() => { $("saved").textContent = "Saved as you go"; }, 4000);
 }
 
-function renderVideos(state) {
-  const list = draft.videos || [];
-  $("videos").replaceChildren(...(list.length ? list.map((v) => {
-    const used = Math.floor(((state.usage.seconds || {})["v:" + v.id] || 0) / 60);
-    const today = v.minutes > 0 ? ` · ${used} of ${v.minutes} min used today` : "";
-    return el("div", { class: "row" },
-      el("div", { class: "name" }, el("div", {}, `Videos about ${videoName(v)}`),
-        el("div", { class: "muted" }, (v.except ? `except ${v.except} · ` : "") + videoMinutesText(v.minutes) + today)),
-      el("button", { class: "link", type: "button", onclick: () => { draft.videos = draft.videos.filter((x) => x.id !== v.id); renderVideos(state); } }, "Remove"));
-  }) : [el("p", { class: "muted" }, "None yet. Try the chat: \"block YouTube videos about video games but keep educational ones\".")]));
+async function propose(rules, extra = {}) {
+  try {
+    const r = await ask("propose", { rules, ...extra });
+    saved(r.later && r.later.length ? `Saved. Loosening applies ${when(r.from)}.` : "Saved");
+  } catch {
+    saved("Not saved: Gatekeeper's background didn't answer");
+  }
+  await load();
 }
 
-function renderPending(state, now) {
-  const p = state.pending;
-  $("pending").classList.toggle("hidden", !p);
-  if (!p) return;
-  $("pending").replaceChildren(
-    `Waiting until ${when(p.from, now)}: your changes that loosen a rule. Until then, today's rules hold. `,
-    el("button", { class: "link", type: "button", onclick: keepToday }, "Keep today's rules"));
+// ---------- daily time ----------
+
+function subtitle(kind, rules, state) {
+  const own = Object.entries(rules.sites || {}).filter(([, k]) => k === kind).map(([d]) => `${d} (you added)`);
+  const sorted = Object.entries(state.sorted || {}).filter(([d, k]) => k === kind && !(d in (rules.sites || {}))).map(([d]) => `${d} (sorted by Claude)`);
+  const known = KINDS[kind].examples.split(", ");
+  const total = KINDS[kind].domains.length + own.length + sorted.length;
+  const shown = [...known.slice(0, 3), ...own.slice(0, 2), ...sorted.slice(0, 1)];
+  const more = total - shown.length;
+  return shown.join(", ") + (more > 0 ? ` and ${more} more` : "");
 }
 
-async function keepToday() {
-  const { state } = await ask("state");
-  await ask("propose", { rules: state.rules });
-  flash("Kept today's rules. Nothing is waiting.");
-  load();
-}
-
-function renderKinds(state) {
-  const inForce = state.rules.kinds;
-  $("kinds").replaceChildren(...KIND_ORDER.map((kind) => {
-    const on = !!draft.kinds[kind];
-    const box = el("input", { type: "checkbox", "data-kind": kind, "aria-label": "Watch " + KINDS[kind].label });
-    box.checked = on;
-    const minutes = el("input", { type: "number", min: "0", max: "600", step: "5", "data-kind": kind,
-      value: String(on ? draft.kinds[kind].minutes : DEFAULT_MINUTES) });
-    minutes.disabled = !on;
-    box.addEventListener("change", () => {
-      if (box.checked) draft.kinds[kind] = { minutes: Number(minutes.value) || 0 };
-      else delete draft.kinds[kind];
-      minutes.disabled = !box.checked;
+function videoChips(rules) {
+  const list = rules.videos || [];
+  if (!list.length) return null;
+  return el("div", { class: "chips", id: "video-rules" }, ...list.map((v) => {
+    const cls = v.minutes === 0 ? "pill closed" : v.minutes === null ? "pill ok" : "pill";
+    const what = v.minutes === 0 ? "closed" : v.minutes === null ? "free" : `${v.minutes} min`;
+    const remove = el("button", { type: "button", "aria-label": `Remove the rule on ${videoName(v)} videos` }, "×");
+    remove.addEventListener("click", () => {
+      const r = wanted();
+      r.videos = r.videos.filter((x) => x.id !== v.id);
+      propose(r);
     });
-    minutes.addEventListener("input", () => { if (draft.kinds[kind]) draft.kinds[kind].minutes = Math.max(0, Number(minutes.value) || 0); });
-    const used = Math.floor(((state.usage.seconds || {})[kind] || 0) / 60);
-    const now = inForce[kind] ? `${used} of ${inForce[kind].minutes} min used today` : "not watched today";
-    return el("div", { class: "row" }, box,
-      el("div", { class: "name" }, el("div", {}, KINDS[kind].label), el("div", { class: "muted" }, now)),
-      minutes, el("span", { class: "muted" }, "min a day"));
+    return el("span", { class: cls, "data-video": v.id }, `${videoName(v)}${v.except ? ` (not ${v.except})` : ""}: ${what}`, remove);
   }));
-  $("new-kind").replaceChildren(...KIND_ORDER.map((k) => el("option", { value: k }, KINDS[k].label)));
 }
 
-function renderSites() {
-  const entries = Object.entries(draft.sites || {}).sort();
-  $("sites").replaceChildren(...(entries.length ? entries.map(([domain, kind]) =>
-    el("div", { class: "row" }, el("div", { class: "name" }, domain), el("span", { class: "muted" }, label(kind)),
-      el("button", { class: "link", type: "button", onclick: () => { delete draft.sites[domain]; renderSites(); } }, "Remove")))
-    : [el("p", { class: "muted" }, "None yet.")]));
+function pendingRow(kind, inForce, want) {
+  const now = got.state.pending && got.state.pending.from;
+  if (inForce && !want) {
+    return el("div", { class: "note", "data-pending": kind }, el("span", {}, `Stops being watched ${when(now)}`),
+      el("button", { class: "link", type: "button", onclick: () => keep(kind, inForce) }, "Keep watching"));
+  }
+  if (inForce && want && want.minutes !== inForce.minutes) {
+    return el("div", { class: "note", "data-pending": kind }, el("span", {}, `Going to ${want.minutes} min ${when(now)}`),
+      el("button", { class: "link", type: "button", onclick: () => keep(kind, inForce) }, `Keep ${inForce.minutes === 0 ? "closed" : inForce.minutes}`));
+  }
+  return null;
 }
 
-$("add-site").addEventListener("click", () => {
-  let d = $("new-site").value.trim().toLowerCase();
-  try { d = new URL(d.includes("://") ? d : "https://" + d).hostname.replace(/^www\./, ""); } catch { return; }
-  if (!d.includes(".")) return;
-  const kind = $("new-kind").value;
-  // Gatekeeper may act only on the sites in its catalog; any other site is asked for here, one at a time,
-  // and the browser asks the user. The request has to start inside the click.
-  chrome.permissions.request({ origins: [`*://*.${d}/*`] }).then((granted) => {
-    if (!granted) {
-      flash(`Gatekeeper needs access to ${d} to count time there and close it. Nothing was added.`);
-      return;
-    }
-    draft.sites = { ...(draft.sites || {}), [d]: kind };
-    $("new-site").value = "";
-    renderSites();
-    flash(`${d} will count as ${label(kind).toLowerCase()} once you save.`);
+function keep(kind, inForce) {
+  const r = wanted();
+  r.kinds[kind] = { minutes: inForce.minutes };
+  propose(r);
+}
+
+let timers = {};
+function kindRow(kind, rules, state) {
+  const want = rules.kinds[kind], inForce = state.rules.kinds[kind];
+  const value = (want || inForce).minutes;
+  const step = stepper({
+    value, label: KINDS[kind].label,
+    onChange: (m) => {
+      // Several clicks in a row are one change.
+      clearTimeout(timers[kind]);
+      timers[kind] = setTimeout(() => { const r = wanted(); r.kinds[kind] = { minutes: m }; propose(r); }, 450);
+    },
+  });
+  const head = el("div", { class: "row", style: "padding: 0" },
+    el("div", { class: "stack" }, el("div", { class: "name" }, KINDS[kind].label), el("div", { class: "sub" }, subtitle(kind, rules, state))),
+    step);
+  const parts = [head];
+  if (kind === "video") { const chips = videoChips(rules); if (chips) parts.push(chips); }
+  const p = pendingRow(kind, inForce, want);
+  if (p) parts.push(p);
+  return el("div", { class: "rowblock", "data-kind": kind }, ...parts);
+}
+
+function renderKinds() {
+  const { state } = got;
+  const rules = wanted();
+  const watched = KIND_ORDER.filter((k) => rules.kinds[k] || state.rules.kinds[k]);
+  const unwatched = KIND_ORDER.filter((k) => !watched.includes(k));
+  const rows = watched.map((k) => kindRow(k, rules, state));
+  // Video rules apply even when Video itself is not watched: they still need a place to be seen.
+  const chips = !watched.includes("video") && videoChips(rules);
+  if (chips) {
+    rows.push(el("div", { class: "rowblock", "data-kind": "videos-only" },
+      el("div", { class: "stack" }, el("div", { class: "name" }, "YouTube videos"), el("div", { class: "sub" }, "Video isn't watched; these rules still apply.")),
+      chips));
+  }
+  if (unwatched.length) {
+    const links = unwatched.flatMap((k, i) => {
+      const b = el("button", { class: "link", type: "button", "data-add": k }, KINDS[k].label);
+      b.addEventListener("click", () => { const r = wanted(); r.kinds[k] = { minutes: DEFAULT_MINUTES }; propose(r); });
+      return i ? [", ", b] : [b];
+    });
+    rows.push(el("div", { class: "row muted small" }, el("span", {}, "Not watched: ", ...links, ". Tap one to add it.")));
+  }
+  rows.push(addSiteRow());
+  $("kinds").replaceChildren(...rows);
+}
+
+function addSiteRow() {
+  const form = el("form", { class: "inline hidden", id: "site-form" },
+    el("input", { class: "field", id: "new-site", placeholder: "example.com", autocomplete: "off", "aria-label": "A site to add" }),
+    el("select", { class: "field", id: "new-kind", style: "flex: 0 0 140px", "aria-label": "Its kind" },
+      ...KIND_ORDER.map((k) => el("option", { value: k }, KINDS[k].label))),
+    el("button", { class: "btn", type: "submit" }, "Add"));
+  const open = el("button", { class: "link", type: "button", style: "align-self: flex-start" }, "Add a site Gatekeeper doesn't know");
+  open.addEventListener("click", () => { form.classList.remove("hidden"); open.classList.add("hidden"); $("new-site").focus(); });
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    let d = $("new-site").value.trim().toLowerCase();
+    try { d = new URL(d.includes("://") ? d : "https://" + d).hostname.replace(/^www\./, ""); } catch { return; }
+    if (!d.includes(".")) return;
+    const kind = $("new-kind").value;
+    // Gatekeeper may act only on the sites in its catalog; any other is asked for here, inside the click.
+    chrome.permissions.request({ origins: [`*://*.${d}/*`] }).then((granted) => {
+      if (!granted) { saved(`Not added: Gatekeeper needs access to ${d}`); return; }
+      const r = wanted();
+      r.sites = { ...(r.sites || {}), [d]: kind };
+      propose(r);
+    });
+  });
+  return el("div", { class: "rowblock small" }, open, form);
+}
+
+// ---------- settings ----------
+
+function renderSettings() {
+  const { state, consent = {}, incognito } = got;
+  $("goal-text").textContent = state.goal || "Not set";
+  $("goal").value = state.goal || "";
+  const help = consent.help || {};
+  $("help").checked = !!help.on;
+  const outdated = help.outdated || (!help.on && Object.values(consent).some((c) => c && c.on));
+  $("help-sub").textContent = help.on
+    ? (state.sorting ? "On: gate answers, rule changes by talking, sorting new sites." : "On: gate answers and rule changes by talking. Sorting new sites needs your browser to let Gatekeeper see every site.")
+    : outdated ? "What's sent changed since you last agreed. Turn it on to agree to the list below." : "Off: nothing is sent.";
+  $("private-pill").textContent = incognito ? "Covered" : "Not covered";
+  $("private-pill").className = incognito ? "pill ok" : "pill warn";
+  $("private-sub").textContent = incognito ? "Gatekeeper works in private windows too." : `Turn on "${privateToggle()}" for Gatekeeper in ${extensionsPage()}.`;
+  for (const b of $("appearance").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.choice === getAppearance()));
+}
+
+const sent = whatsSentToggle();
+$("help-sub").after(el("div", {}, sent.link));
+$("help-sent").append(sent.list);
+
+$("help").addEventListener("change", () => {
+  const on = $("help").checked;
+  // Sorting new sites needs to see every site; the browser asks, and the request has to start in the click.
+  const permission = on ? chrome.permissions.request({ origins: ["*://*/*"] }).catch(() => false) : chrome.permissions.remove({ origins: ["*://*/*"] }).catch(() => false);
+  permission.then(async () => {
+    try { await ask("consent", { help: on }); saved(on ? "Claude help is on" : "Claude help is off: nothing is sent"); }
+    catch { saved("Not saved: Gatekeeper's background didn't answer"); }
+    await load();
   });
 });
 
-function flash(text, list = []) {
-  $("result").replaceChildren(text, ...(list.length ? [el("ul", { class: "changes" }, ...list.map((t) => el("li", {}, t)))] : []));
-  $("result").classList.remove("hidden");
-}
-
-$("save").addEventListener("click", async () => {
-  const r = await ask("propose", { rules: draft, goal: $("goal").value });
-  const parts = [];
-  if (r.now.length) parts.push("Applied now: " + r.now.map((c) => c.text).join("; ") + ".");
-  if (r.later.length) parts.push(`Takes effect ${when(r.from)}: ` + r.later.map((c) => c.text).join("; ") + ".");
-  flash(parts.join(" ") || "Saved.");
-  load();
-});
-
-load();
-
-// ---------- the rules chat ----------
-
-let history = []; // this conversation: { role: "user" | "gatekeeper", text }, kept only on this page
-let consent = {}; // switch -> { on, outdated }, as the background last said
-
-function say(text, me) {
-  $("chat-log").append(el("div", { class: "msg" + (me ? " me" : "") }, text));
-}
-
-$("chat-message").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("chat-form").requestSubmit(); }
-});
-
-$("chat-form").addEventListener("submit", (e) => {
+$("goal-edit").addEventListener("click", () => { $("goal-form").classList.toggle("hidden"); $("goal").focus(); });
+$("goal-form").addEventListener("submit", (e) => {
   e.preventDefault();
-  const text = $("chat-message").value.trim();
-  if (!text) return;
-  if (!(consent.chat && consent.chat.on)) {
-    // Nothing leaves the browser before this yes.
-    $("chat-consent").classList.remove("hidden");
-    $("chat-form").classList.add("hidden");
-    return;
-  }
-  sendChat(text);
+  $("goal-form").classList.add("hidden");
+  propose(wanted(), { goal: $("goal").value });
 });
 
-$("chat-yes").addEventListener("click", async () => {
-  const r = await saveConsent({ chat: true });
-  $("chat-consent").classList.add("hidden");
-  $("chat-form").classList.remove("hidden");
-  if (r && r.chat) sendChat($("chat-message").value.trim());
+$("appearance").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-choice]");
+  if (!b) return;
+  setAppearance(b.dataset.choice);
+  renderSettings();
 });
 
-$("chat-no").addEventListener("click", () => {
-  $("chat-consent").classList.add("hidden");
-  $("chat-form").classList.remove("hidden");
-  say("Then nothing is sent. The boxes below still change your rules.");
-});
+$("talk-link").append(chatIcon(), "Change something by talking");
 
-async function sendChat(text) {
-  if (!text) return;
-  say(text, true);
-  $("chat-message").value = "";
-  $("card").classList.add("hidden");
-  $("chat-send").disabled = $("chat-message").disabled = true;
-  let r;
-  try { r = await ask("chat", { message: text, history }); } catch { r = { failed: "unreachable" }; }
-  $("chat-send").disabled = $("chat-message").disabled = false;
-  history.push({ role: "user", text });
-  if (r.refused === "no_consent") { $("chat-consent").classList.remove("hidden"); $("chat-form").classList.add("hidden"); return; }
-  if (r.failed) {
-    say(r.failed === "daily_limit" ? "That is enough rule changes by chat for today. The boxes below still work." : "Can't reach Claude right now. The boxes below still work.");
-    return;
-  }
-  const answer = r.question || r.reply;
-  if (answer) { say(answer); history.push({ role: "gatekeeper", text: answer }); }
-  if (r.question) { $("chat-message").focus(); return; }
-  showCard(r);
+async function load() {
+  got = await ask("state");
+  if (!warned) warned = warnings({ ...got, incognito: true }, $("daily")) >= 0; // private windows: shown in Settings
+  renderKinds();
+  renderSettings();
 }
-
-function showCard(p) {
-  const card = $("card");
-  if (!p.now.length && !p.later.length) {
-    say("That changes nothing in your rules.");
-    card.classList.add("hidden");
-    return;
-  }
-  const line = (c, tag, cls) => el("div", {}, el("span", { class: "when" + (cls ? " " + cls : "") }, tag), c.text);
-  const addsVideos = (p.rules.videos || []).length > ((draft && draft.videos) || []).length;
-  const rows = [
-    ...p.now.map((c) => line(c, "Now")),
-    ...p.later.map((c) => line(c, when(p.from), "later")),
-  ];
-  if (p.later.length) rows.push(el("p", { class: "muted" }, "Loosening always waits until the next morning. For a real need now, open the site and talk to the gate."));
-  if (p.needsAccess.length) rows.push(el("p", { class: "muted" }, `Your browser will ask to let Gatekeeper see ${p.needsAccess.join(", ")}.`));
-  if (p.skipped) rows.push(el("p", { class: "muted" }, `${p.skipped} part${p.skipped === 1 ? "" : "s"} of the answer could not be used and ${p.skipped === 1 ? "is" : "are"} left out.`));
-  const actions = el("div", { class: "actions" });
-  const done = () => { card.classList.add("hidden"); };
-  const apply = async (judge) => {
-    if (p.needsAccess.length) {
-      const granted = await chrome.permissions.request({ origins: p.needsAccess.map((d) => `*://*.${d}/*`) });
-      if (!granted) { say(`Gatekeeper needs access to ${p.needsAccess.join(", ")} to count time there and close it. Nothing was changed.`); done(); return; }
-    }
-    if (judge !== undefined) await saveConsent({ judge });
-    const r = await ask("propose", { rules: p.rules });
-    const parts = [];
-    if (r.now.length) parts.push("Applied now: " + r.now.map((c) => c.text).join("; ") + ".");
-    if (r.later.length) parts.push(`Takes effect ${when(r.from)}: ` + r.later.map((c) => c.text).join("; ") + ".");
-    flash(parts.join(" ") || "Saved.");
-    say("Applied.");
-    done();
-    load();
-  };
-  if (addsVideos && !(consent.judge && consent.judge.on)) {
-    // The first video rule asks how videos are judged: the user's yes before any title is sent.
-    rows.push(el("p", {}, "How should Gatekeeper tell which videos a rule covers? Claude judges each video you open on YouTube from its title and channel (sent with your rules' wording, never the address), or this browser matches words, which is rougher and sends nothing."));
-    actions.append(
-      el("button", { class: "primary", type: "button", onclick: () => apply(true) }, "Apply, Claude judges"),
-      el("button", { class: "link", type: "button", onclick: () => apply(false) }, "Apply, words only"));
-  } else {
-    actions.append(el("button", { class: "primary", type: "button", onclick: () => apply() }, "Apply"));
-  }
-  actions.append(el("button", { class: "link", type: "button", onclick: () => { say("Nothing changed."); done(); } }, "Cancel"));
-  card.replaceChildren(...rows, actions);
-  card.classList.remove("hidden");
-}
-
-// ---------- Claude: four switches, each a yes to sending something ----------
-
-const ALL_SITES = { origins: ["*://*/*"] };
-const SWITCHES = { talk: "talk", sorting: "sorting", chat: "chat-switch", judge: "judge" };
-
-function showSwitches(c) {
-  consent = c;
-  for (const [name, id] of Object.entries(SWITCHES)) $(id).checked = !!(c[name] && c[name].on);
-  $("consent-outdated").classList.toggle("hidden", !Object.values(c).some((x) => x && x.outdated));
-}
-
-async function loadSwitches() {
-  const got = await ask("state");
-  showSwitches(got.consent || {});
-}
-
-// A switch shows what is saved, never just what was clicked.
-async function saveConsent(change) {
-  try {
-    const r = await ask("consent", change);
-    showSwitches(Object.fromEntries(Object.keys(SWITCHES).map((k) => [k, { on: !!r[k], outdated: false }])));
-    return r;
-  } catch {
-    await loadSwitches().catch(() => { for (const id of Object.values(SWITCHES)) $(id).checked = false; });
-    flash("That change was not saved: Gatekeeper's background did not answer.");
-    return null;
-  }
-}
-
-$("talk").addEventListener("change", async () => {
-  const r = await saveConsent({ talk: $("talk").checked });
-  if (r) flash(r.talk ? "The gate can talk back." : "The gate no longer sends anything.");
-});
-
-$("sorting").addEventListener("change", () => {
-  if ($("sorting").checked) {
-    // The browser asks the user; the request has to start inside the click.
-    chrome.permissions.request(ALL_SITES).then(async (granted) => {
-      const r = await saveConsent({ sorting: granted });
-      if (r) flash(r.sorting ? "Sites Gatekeeper doesn't know will be sorted after a minute." : "Without that permission Gatekeeper cannot see other sites, so sorting stays off.");
-    });
-  } else {
-    saveConsent({ sorting: false }).then((r) => {
-      if (!r) return;
-      chrome.permissions.remove(ALL_SITES);
-      flash("Sorting is off. Sites already sorted keep their kind.");
-    });
-  }
-});
-
-$("chat-switch").addEventListener("change", async () => {
-  const r = await saveConsent({ chat: $("chat-switch").checked });
-  if (r) flash(r.chat ? "The chat can send to Claude." : "The chat sends nothing.");
-});
-
-$("judge").addEventListener("change", async () => {
-  const r = await saveConsent({ judge: $("judge").checked });
-  if (r) flash(r.judge ? "Claude judges videos for your video rules." : "Video rules now match words on this device, and what Claude judged is forgotten.");
-});
 
 checkWorker();
-loadSwitches();
+load();

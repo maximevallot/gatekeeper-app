@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Change something · Gatekeeper</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="popup">
+<main class="panel" id="talk-main" style="gap: 14px">
+  <div style="display: flex; align-items: center; gap: 10px">
+    <a class="iconbtn" id="back" href="popup.html" aria-label="Back">
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    </a>
+    <h1 style="font-size: 20px; font-weight: 800">Change something</h1>
+  </div>
+
+  <div class="bubbles" id="chat-log" style="flex-grow: 1">
+    <div class="bubble">Say what to change, in your words. Anything that loosens a rule waits until tomorrow morning.</div>
+  </div>
+
+  <div class="change hidden" id="chat-consent">
+    <div style="font-size: 15px; font-weight: 600">Turn on Claude help?</div>
+    <div id="consent-list"></div>
+    <div class="actions">
+      <button class="btn" type="button" id="chat-yes">Turn on</button>
+      <button class="btn ghost" type="button" id="chat-no">Not now</button>
+    </div>
+  </div>
+
+  <div class="chips" id="suggest">
+    <button class="suggest" type="button">Less social media</button>
+    <button class="suggest" type="button">Close YouTube gaming videos, keep lectures</button>
+    <button class="suggest" type="button">No news on weekdays</button>
+  </div>
+
+  <form class="inline" id="chat-form">
+    <label for="chat-message" class="sr">Say what to change</label>
+    <input class="field" id="chat-message" placeholder="Say it in your words" autocomplete="off" maxlength="500" style="border-radius: 14px">
+    <button class="btn" id="chat-send" type="submit" aria-label="Send" style="width: 48px; padding: 0; border-radius: 14px">
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    </button>
+  </form>
+</main>
+<script type="module" src="talk.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your week · Gatekeeper</title>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="page">
+  <div class="section" style="gap: 6px">
+    <div class="muted" id="range"></div>
+    <div class="hero"><div class="big" id="total"></div><div class="what" id="allowed"></div></div>
+  </div>
+  <div class="card" style="padding: 20px 24px 16px; display: flex; flex-direction: column; gap: 12px">
+    <div class="row small muted" style="padding: 0"><span>Minutes on watched sites</span><span id="limit-label"></span></div>
+    <div class="bars" id="bars"></div>
+    <div class="days" id="days"></div>
+  </div>
+  <div class="counts">
+    <div class="card"><div class="n" id="gates"></div><div class="muted">times the gate held</div></div>
+    <div class="card"><div class="n" id="passes"></div><div class="muted">passes for real needs</div></div>
+    <div class="card"><div class="n" id="clear"></div><div class="muted" id="clear-label">days nothing had to close</div></div>
+  </div>
+  <p class="small muted" id="note"></p>
+  <p class="small"><a href="rules.html">Your rules</a></p>
+</main>
+<script type="module" src="week.js"></script>
+</body>
+</html>

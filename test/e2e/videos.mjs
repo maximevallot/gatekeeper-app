@@ -28,7 +28,7 @@ const short = (u) => String(u).replace(/^chrome-extension:\/\/[a-z]+/, "ext:");
 
 function cleanup() {
   for (const c of children) try { c.kill(); } catch {}
-  rmSync(work, { recursive: true, force: true });
+  (() => { try { rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch {} })();
 }
 process.on("exit", cleanup);
 
@@ -100,7 +100,8 @@ try {
 
   // The chat: nothing is sent before the yes; then a card with two lines, both now.
   const rulesUrl = await sw.evaluate(`chrome.runtime.getURL("pages/rules.html")`);
-  await p.send("Page.navigate", { url: rulesUrl }); await sleep(1200);
+  const talkUrl = await sw.evaluate(`chrome.runtime.getURL("pages/talk.html?from=rules")`);
+  await p.send("Page.navigate", { url: talkUrl }); await sleep(1200);
   const before = mock.requests.length;
   await p.evaluate(`document.getElementById('chat-message').value = 'block YouTube videos about video games but keep educational ones'; document.getElementById('chat-form').requestSubmit();`);
   await sleep(600);
@@ -114,12 +115,13 @@ try {
   check("Claude saw the sentence and the rules, not today's minutes", /video games but keep educational/.test(chatReq.body.messages[0].content) && !/seconds/.test(chatReq.body.messages[0].content));
   let s = await st();
   check("nothing changed before Apply", s.rules.videos.length === 0, s.rules.videos);
-  await p.evaluate(`[...document.querySelectorAll('#card button')].find(b => /Claude judges/.test(b.textContent)).click()`);
+  await p.evaluate(`document.getElementById('apply').click()`);
   await sleep(1200);
   s = await st();
-  check("Apply made two video rules and recorded the yes to judging", s.rules.videos.length === 2 && s.consent.judge === 1 && s.consent.chat === 1, { videos: s.rules.videos, consent: s.consent });
-  const listed = await p.evaluate(`document.getElementById('videos').innerText`);
-  check("the rules page lists them", /Videos about video games/.test(listed) && /Videos about educational/.test(listed), listed);
+  check("Apply made two video rules and recorded the yes to judging", s.rules.videos.length === 2 && s.consent.help === 1, { videos: s.rules.videos, consent: s.consent });
+  await p.send("Page.navigate", { url: rulesUrl }); await sleep(1200);
+  const listed = await p.evaluate(`(document.getElementById('video-rules') || {}).innerText || ''`);
+  check("the rules page lists them as chips under Video", /video games.*closed/i.test(listed) && /educational.*free/i.test(listed), listed);
 
   // A game video: judged by Claude from its title and channel, then sent to the gate.
   await p.send("Page.navigate", { url: watch("GAMEvid0001") });
@@ -146,7 +148,9 @@ try {
 
   // Close Video entirely (a tightening, so now): the lecture still opens; an unjudged video does not.
   await p.send("Page.navigate", { url: rulesUrl }); await sleep(1200);
-  await p.evaluate(`(() => { const b = document.querySelector('input[type=checkbox][data-kind=video]'); b.click(); const i = document.querySelector('input[type=number][data-kind=video]'); i.value = '0'; i.dispatchEvent(new Event('input')); document.getElementById('save').click(); })()`);
+  await p.evaluate(`document.querySelector('[data-add=video]').click()`); await sleep(1500);
+  for (let i = 0; i < 3; i++) { await p.evaluate(`document.querySelector('[data-kind=video] [data-step="-1"]').click()`); await sleep(120); }
+  await sleep(1500);
   await sleep(1200);
   s = await st();
   check("Video is closed all day, at once", s.rules.kinds.video?.minutes === 0, s.rules.kinds);
@@ -162,7 +166,7 @@ try {
 
   // Turning judging off forgets what Claude judged.
   await p.send("Page.navigate", { url: rulesUrl }); await sleep(1200);
-  await p.evaluate(`document.getElementById('judge').click()`); await sleep(800);
+  await p.evaluate(`document.getElementById('help').click()`); await sleep(1200);
   s = await st();
   check("judging off: no yes kept, and Claude's judgments forgotten", !s.consent.judge && !Object.values(s.judged).some((j) => j.by === "claude"), { consent: s.consent, judged: s.judged });
   check("YouTube was asked for titles only by video ID", oembedAsked.length >= 3 && oembedAsked.every((id) => id in VIDEOS), oembedAsked);

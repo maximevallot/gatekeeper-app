@@ -23,6 +23,17 @@ This is the product: anyone can install it, with no account. Maxime's personal v
 - **Unknown sites are sorted.** When a site that is neither in the catalog nor one of yours has been in front for a minute, Claude is asked once which kind it is. The answer is kept on this device, and the site counts against that kind from then on. A failed sort is retried after an hour. Sorting needs the browser's permission to see every site, asked for when you turn it on.
 - What is sent, to the [relay](../gatekeeper-relay) (which holds the Anthropic key and keeps none of it): for a gate message, the site's domain and kind, today's minutes and budget for that kind, your goal sentence, what you typed, and a random install number; for a sort, the domain, the page title and the install number. Never the page's path, its content, other tabs, or your other rules.
 
+**The simplified design (for 0.2.0, on main, not released)**, from `~/brain/outputs/gatekeeper-simplified-design/`. Screenshots are in `docs/`.
+
+- **Today** is the toolbar popup (`pages/popup.html`). It shows a ring per watched kind (minutes left, or a lock and when it reopens), the mode chip, the goal, *Change something*, and links to all rules and the week.
+- **Change something** (`pages/talk.html`) is the rules chat on its own screen, in the popup or a tab: bubbles, a card whose lines are tagged *now* or *tomorrow*, *Apply* or *Not this*, and suggestion chips.
+- **The gate** shows one big line ("Closed until 4:00 tomorrow"), the goal card, and one box with a line on what's sent.
+- **Your week** (`pages/week.html`) shows minutes on watched sites per day against the limit, and counts of gates held, passes, and days nothing had to close. It is kept on the device only (`state.history`, one line per finished day, 30 days), and fills in from the day this version is installed. It shows minutes against what was allowed, not "time won back": there is no baseline to measure that from.
+- **Your rules** saves as you go. Each kind has a − / + stepper and one subtitle line naming its sites, yours and Claude's sorted ones included. Video rules are chips. A waiting loosening is an amber row with *Keep*. Settings has the goal, Claude help, private windows and Appearance.
+- **Welcome** is one page with three questions (kind chips, one minutes stepper for all, the goal) and one *Let Claude help* box. The private-windows step comes after Start.
+- **Claude help** is one switch (`CONSENT.help`) for the gate, the rules chat, video judging and sorting. The full list in `WHATS_SENT` is shown under *What's sent*, and at the first request. Raising `CONSENT.help` asks again. Turning it off withdraws every yes, the older per-feature ones too. Sorting comes with it only where the browser lets Gatekeeper see every site.
+- **Appearance**: Light by default; Dark (deep slate) and Match Mac are chosen in Settings and kept in the pages' local storage, applied before the page draws (`pages/theme.js`). The pages use Figtree from `extension/fonts/Figtree.woff2` when that file is present, else the system font. No remote fonts.
+
 **Milestone 3: rules by chat, and YouTube video rules** (branch `rules-chat`; design in `~/brain/outputs/html/2026-10-16-gatekeeper-rules-by-talking.html`). Each is off until the user says yes.
 
 - **The rules chat**, at the top of the rules page. Type or dictate what to change ("block YouTube videos about video games but keep educational ones"). The relay's `/rules` turns it into a list of operations; the engine applies them to a copy of the rules and runs `proposeRules`, so the card shows only what Apply will really do: what changes now, and what waits for the morning. Claude may ask one question instead. Nothing changes until Apply. Sent: the message, the chat's earlier turns, the rules last asked for, today's date and the install number; never usage.
@@ -60,7 +71,7 @@ To try the Claude features before the relay is deployed, run it locally: in `~/g
 npm test
 ```
 
-47 tests under node, no dependencies, including video rules and the chat in `test/videos.test.mjs`: the engine (budgets, loosening, passes, the gate's request and answer, sorting, and the QA findings of 2026-10-16 in `test/qa.test.mjs`), the redirect and block rules, and the manifest against the catalog.
+55 tests under node, no dependencies, including video rules and the chat in `test/videos.test.mjs`, and Claude help, the week and today in `test/design.test.mjs`: the engine (budgets, loosening, passes, the gate's request and answer, sorting, and the QA findings of 2026-10-16 in `test/qa.test.mjs`), the redirect and block rules, and the manifest against the catalog.
 
 ```sh
 npm run e2e

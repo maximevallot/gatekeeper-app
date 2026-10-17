@@ -43,7 +43,18 @@ export const MAX_ALLOWED_VIDEOS = 50; // judged videos given a rule of their own
 
 // The version of each consent text. Raise one when what that switch sends changes: the user is asked again.
 // talk: the gate. sorting: unknown sites. chat: the rules chat. judge: video rules judged by Claude.
-export const CONSENT = { talk: 1, sorting: 1, chat: 1, judge: 1 };
+export const CONSENT = { talk: 1, sorting: 1, chat: 1, judge: 1, help: 1 };
+
+// "Claude help": one yes for everything below. Raise CONSENT.help whenever this list changes, so the user is
+// asked again. The pages show this list, word for word, before the first request.
+export const HELP_COVERS = ["talk", "chat", "judge", "sorting"];
+export const WHATS_SENT = [
+  { what: "The gate", sent: "the site's name (not its address) and kind, today's minutes and budget for that kind, your goal sentence, and what you type", when: "when you ask the gate for time" },
+  { what: "Changing rules by talking", sent: "what you type, the earlier messages of that talk, your rules (no usage), and today's date", when: "when you send a message" },
+  { what: "Video rules", sent: "a YouTube video's title and channel, and the wording of your video rules", when: "once per video you open, when you have video rules" },
+  { what: "Sorting new sites", sent: "the site's name and page title", when: "once per site Gatekeeper doesn't know, after a minute on it" },
+];
+export const SENT_TO = "Each request also carries a random install number. It goes to Gatekeeper's relay, which asks Anthropic's Claude and keeps none of it. Nothing else leaves this browser: never page content, addresses, or other tabs.";
 
 export function initialState() {
   return {
@@ -65,6 +76,7 @@ export function initialState() {
     consent: {}, // switch -> the CONSENT version the user said yes to
     judged: {}, // "yt:<id>" -> { rule, key, by, at }: which video rule a video falls under (rule null: none)
     judging: {}, // "yt:<id>" -> when it was asked: a judgment in flight
+    history: [], // one summary per finished day, the last HISTORY_DAYS, on this device only
   };
 }
 
@@ -155,15 +167,75 @@ export function rollover(state, now) {
   let s = state;
   const t = Math.max(Number(now) || 0, (s.clock && s.clock.floor) || 0);
   if (!s.clock || s.clock.floor !== t) s = { ...s, clock: { floor: t } };
+  const ending = !s.usage.endsAt || t >= s.usage.endsAt;
+  // The day that ends goes into the week's history, under the rules it was lived by.
+  if (ending && s.usage.day) s = { ...s, history: [...(s.history || []).filter((h) => h.day !== s.usage.day), daySummary(s)].slice(-HISTORY_DAYS) };
   if (s.pending && t >= s.pending.from) s = { ...s, rules: s.pending.rules, pending: null };
-  if (!s.usage.endsAt || t >= s.usage.endsAt) {
+  if (ending) {
     s = {
       ...s,
-      usage: { day: dayKey(t, s.rules.dayStart), endsAt: nextDayStart(t, s.rules.dayStart), seconds: {}, passes: {} },
+      usage: { day: dayKey(t, s.rules.dayStart), endsAt: nextDayStart(t, s.rules.dayStart), seconds: {}, passes: {}, gates: 0 },
       unknown: {}, followUps: {},
     };
   }
   return s;
+}
+
+// ---------- the week ----------
+// Kept on this device only: one line per day, the minutes on watched sites, the minutes allowed, how many
+// times a gate closed a site, and how many passes the gate granted.
+
+export const HISTORY_DAYS = 30;
+
+function daySummary(s) {
+  const seconds = Object.values(s.usage.seconds || {}).reduce((a, b) => a + b, 0);
+  const allowed = Object.values(s.rules.kinds || {}).reduce((a, k) => a + (k.minutes || 0), 0);
+  const passes = Object.values(s.usage.passes || {}).reduce((a, b) => a + b, 0);
+  return { day: s.usage.day, minutes: Math.round(seconds / 60), allowed, gates: s.usage.gates || 0, passes };
+}
+
+/** A gate was shown for a closed site: one more for the week's count. */
+export function noteGate(state, now) {
+  const s = rollover(state, now);
+  return { ...s, usage: { ...s.usage, gates: (s.usage.gates || 0) + 1 } };
+}
+
+/** The last seven days, today last; a day with no record (before history began) is null. */
+export function weekSummary(state, now) {
+  const s = rollover(state, now);
+  const t = s.clock.floor;
+  const byDay = new Map((s.history || []).map((h) => [h.day, h]));
+  byDay.set(s.usage.day, daySummary(s));
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const key = dayKey(t - i * 86400e3, s.rules.dayStart);
+    const [y, m, d] = key.split("-").map(Number);
+    days.push({ day: key, weekday: new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short" }), ...(byDay.get(key) || { none: true }) });
+  }
+  const kept = days.filter((d) => !d.none);
+  const sum = (f) => kept.reduce((a, d) => a + (d[f] || 0), 0);
+  return {
+    days, minutes: sum("minutes"), allowed: sum("allowed"), gates: sum("gates"), passes: sum("passes"),
+    clearDays: kept.filter((d) => d.day !== s.usage.day && !d.gates).length, keptDays: kept.length,
+  };
+}
+
+// ---------- today ----------
+
+const SHORT = { social: "Social" };
+
+/** What the toolbar's Today shows: one entry per watched kind, the goal, and the day's end. */
+export function todaySummary(state, now) {
+  const s = rollover(state, now);
+  const order = [...Object.keys(KINDS)].filter((k) => s.rules.kinds[k]);
+  const kinds = order.map((k) => {
+    const minutes = s.rules.kinds[k].minutes;
+    const used = usedSeconds(s, k);
+    const left = Math.max(0, Math.ceil((minutes * 60 - used) / 60));
+    const status = minutes === 0 ? "closed" : used >= minutes * 60 ? "spent" : "open";
+    return { kind: k, label: label(k), short: SHORT[k] || label(k), minutes, left, status, fraction: minutes ? Math.max(0, (minutes * 60 - used) / (minutes * 60)) : 0 };
+  });
+  return { kinds, goal: s.goal || "", reopensAt: s.usage.endsAt, setupDone: !!s.setupDone, waiting: !!s.pending };
 }
 
 const usedSeconds = (s, kind) => s.usage.seconds[kind] || 0;
@@ -589,7 +661,21 @@ export function setSorting(state, on) {
 
 /** Whether the user said yes to the present text of this switch. */
 export function consented(state, name) {
-  return !!CONSENT[name] && (state.consent || {})[name] === CONSENT[name];
+  const c = state.consent || {};
+  if (CONSENT[name] && c[name] === CONSENT[name]) return true;
+  return HELP_COVERS.includes(name) && c.help === CONSENT.help;
+}
+
+/**
+ * The one "Claude help" switch. On: a yes to every item in WHATS_SENT; sorting also needs the browser's
+ * permission to see every site, so it is on only if `sorting` (that permission) is true. Off: no yes is kept
+ * for any of them, nothing is sent, and what Claude judged is forgotten.
+ */
+export function setHelp(state, on, { sorting = false } = {}) {
+  let s = setConsent(state, "help", on);
+  if (on) return { ...s, talk: true, sorting: !!sorting, unknown: sorting ? s.unknown || {} : {} };
+  for (const name of HELP_COVERS) s = setConsent(s, name, false);
+  return { ...s, talk: false, sorting: false, unknown: {} };
 }
 
 /** Record a yes (to the present text) or a no. Turning judging off forgets what Claude judged. */
