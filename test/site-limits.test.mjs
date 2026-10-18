@@ -160,6 +160,8 @@ test("exam mode closes a site's own limit, null (only in exam mode) included; nu
   const today = todaySummary(ex, MON);
   assert.deepEqual(today.sites.map((x) => [x.site, x.status]), [["example.org", "closed"], ["lequipe.fr", "closed"]]);
   assert.ok(today.sites.every((x) => x.exam));
+  const gate = gateRequest(ex, { url: LEQUIPE, message: "I need it for the exam", now: MON }).payload;
+  assert.deepEqual([gate.kind, gate.site, gate.budget], ["site", "lequipe.fr", 0], "a null limit is sent as budget 0, as the relay needs a number");
 });
 
 test("Today has one row per site under the kinds; the old state upgrades with no limits", () => {
