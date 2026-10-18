@@ -51,7 +51,14 @@ async function show() {
   $("closed").classList.remove("hidden");
   warnings(decided, $("closed"));
   talk = { on: decided.talk, host, kind: d.label };
-  if (d.exam) { shut(""); $("rules-link").textContent = "End exam mode early"; }
+  if (d.exam) {
+    // In exam mode the gate gives a short pass only for a page that serves the exam.
+    $("rules-link").textContent = "End exam mode early";
+    $("rules-link").href = chrome.runtime.getURL("pages/rules.html#exam");
+    document.querySelector('label[for="message"]').textContent = "Need it for the exam?";
+    $("message").placeholder = "What on this page do you need for the exam?";
+    if (decided.cooldownUntil) shut(`We already talked about this. The answer stands until ${clock(decided.cooldownUntil)}.`);
+  }
   else if (d.video) shut("");
   else if (decided.cooldownUntil) shut(`We already talked about this. The answer stands until ${clock(decided.cooldownUntil)}.`);
   else $("message").focus();

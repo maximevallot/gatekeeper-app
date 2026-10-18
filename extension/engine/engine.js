@@ -35,6 +35,7 @@ export const SORT_RETRY_MS = 3600e3; // after a failed sort, wait an hour before
 export const PASS_LADDER = [10, 5, 2]; // the longest first, second and third pass for a kind in one day; then none
 export const MAX_PASS_MINUTES = PASS_LADDER[0]; // the relay clamps a pass to this too
 export const COOLDOWN_MS = 10 * 60e3; // after a no, the gate does not listen again for this long
+export const EXAM_MAX_PASS_MINUTES = 5; // in exam mode, a pass only for a page that serves the exam, and short
 export const AFTER_PASS_MS = 15 * 60e3; // after a pass ends, the gate does not listen again for this long
 export const FOLLOW_UP_MS = 10 * 60e3; // one follow-up to a question, within this long
 export const MAX_MESSAGE = 500;
@@ -326,6 +327,9 @@ export function decide(state, { url, title = "", now }) {
     if (video && video.verdict === "allow" && !video.watched) return video;
     const kind = kindOf(s, url);
     if (KINDS[kind]) {
+      // A pass the gate gave for this page because it serves the exam (decision of 2026-10-17).
+      const pass = passFor(s, url, kind);
+      if (pass) return { verdict: "allow", kind, bucket: kind, label: label(kind), watched: true, pass: true, exam: { ...s.rules.exam }, leftMinutes: Math.ceil(pass.secondsLeft / 60) };
       return { verdict: "block", kind, bucket: kind, label: label(kind), watched: true, title, exam: { ...s.rules.exam },
         usedMinutes: Math.floor(usedSeconds(s, kind) / 60), budgetMinutes: (s.rules.kinds[kind] || {}).minutes ?? null, reopensAt: s.rules.exam.until };
     }
@@ -389,7 +393,8 @@ export function tick(state, { url, title = "", focused, active, seconds, now, au
     const e = (s.unknown || {})[domain] || { seconds: 0 };
     const next = { ...e, seconds: e.seconds + add };
     const asking = e.asking && t - e.asking < 120e3; // a call in flight; a lost one is retried after 2 minutes
-    if (next.seconds >= SORT_AFTER_SECONDS && !asking && !(e.retryAt > t)) {
+    // In exam mode a site Gatekeeper doesn't know is checked as soon as it opens, not after a minute.
+    if ((next.seconds >= SORT_AFTER_SECONDS || examOn(s)) && !asking && !(e.retryAt > t)) {
       next.asking = t;
       sort = domain;
     }
@@ -713,7 +718,6 @@ export function gateRequest(state, { url, message, now }) {
   const text = String(message || "").trim();
   if (!consented(s, "talk")) return { refused: "no_consent" };
   if (d.verdict === "allow") return { refused: "open" };
-  if (d.exam) return { refused: "exam" }; // exam mode has no second round
   if (d.video) return { refused: "video_rule" }; // a video rule is changed on the rules page, not argued at the gate
   const cool = (s.cooldowns || {})[d.kind] || 0;
   if (cool > t) return { refused: "cooldown", until: cool };
@@ -722,7 +726,9 @@ export function gateRequest(state, { url, message, now }) {
   return {
     payload: {
       installId: s.installId, goal: s.goal || "", site: siteDomain(url), kind: d.kind,
-      minutesUsed: Math.min(d.usedMinutes, 1440), budget: d.budgetMinutes, deadlines: [],
+      minutesUsed: Math.min(d.usedMinutes || 0, 1440), budget: d.budgetMinutes ?? 0, deadlines: [],
+      // In exam mode the gate gives a pass only for a page that serves the exam (shared name, one-model step 1).
+      exam: d.exam ? { until: d.exam.until, goal: d.exam.goal || "" } : null,
       message: text.slice(0, MAX_MESSAGE),
     },
   };
@@ -746,7 +752,7 @@ export function applyGateAnswer(state, { url, answer, now }) {
   const { [kind]: _, ...followUps } = s.followUps || {};
   if (answer.decision === "allow") {
     const n = s.usage.passes[kind] || 0;
-    const cap = PASS_LADDER[Math.min(n, PASS_LADDER.length - 1)];
+    const cap = Math.min(PASS_LADDER[Math.min(n, PASS_LADDER.length - 1)], examOn(s) ? EXAM_MAX_PASS_MINUTES : Infinity);
     const minutes = Math.max(1, Math.min(cap, Math.round(Number(answer.minutes) || 1)));
     s = {
       ...s, followUps,

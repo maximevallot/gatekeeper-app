@@ -3,13 +3,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   initialState, completeSetup, decide, tick, proposeRules, closedDomains, gateRequest, setHelp, startExam, endExam, examOn,
-  applyMacRequest, snapshot, snapshotKey, todaySummary, rollover,
+  applyMacRequest, snapshot, snapshotKey, todaySummary, rollover, applyGateAnswer, setSorting,
 } from "../extension/engine/engine.js";
 
 const at = (iso) => new Date(iso).getTime();
 const MON = at("2026-10-19T20:00:00-04:00");
 const WED = at("2026-10-21T08:30:00-04:00");
 const visit = (url, now) => ({ url, title: "", focused: true, active: true, seconds: 2, now });
+const applyGate = (s, url, minutes) => applyGateAnswer(s, { url, answer: { decision: "allow", minutes, reply: "ok" }, now: MON });
 const setUp = (kinds) => ({ ...completeSetup(initialState(), { kinds, goal: "Finish problem set 4" }, MON).state, installId: "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f" });
 
 test("exam.start closes every kind at once, watched or not, until the end time", () => {
@@ -105,4 +106,22 @@ test("a snapshot is sent again only when what the Mac shows changes, not every s
   let c = s;
   for (let i = 0; i < 31; i++) c = tick(c, visit("https://www.instagram.com/", MON + i * 2000)).state;
   assert.notEqual(snapshotKey(a), snapshotKey(snapshot(c, MON + 62000, {})));
+});
+
+test("decision 2: in exam mode the gate talks, a pass is at most 5 minutes, and it opens only that site", () => {
+  let s = setHelp(startExam(setUp({ video: 20 }), { until: WED, goal: "15.425 midterm" }, MON).state, true);
+  const req = gateRequest(s, { url: "https://www.youtube.com/watch?v=wacc", message: "The WACC lecture for the exam", now: MON });
+  assert.deepEqual(req.payload.exam, { until: WED, goal: "15.425 midterm" });
+  const g = applyGate(s, "https://www.youtube.com/watch?v=wacc", 10);
+  assert.equal(g.result.minutes, 5);
+  assert.equal(decide(g.state, { url: "https://www.youtube.com/watch?v=wacc", now: MON + 60e3 }).verdict, "allow");
+  assert.equal(decide(g.state, { url: "https://vimeo.com/1", now: MON + 60e3 }).verdict, "block");
+  assert.equal(decide(g.state, { url: "https://www.instagram.com/", now: MON + 60e3 }).verdict, "block");
+});
+
+test("decision 2: in exam mode a site Gatekeeper doesn't know is sorted as soon as it opens", () => {
+  const s = setSorting(startExam(setUp({}), { until: WED }, MON).state, true);
+  assert.equal(tick(s, visit("https://www.lequipe.fr/", MON)).sort, "lequipe.fr");
+  const normal = setSorting(setUp({}), true);
+  assert.equal(tick(normal, visit("https://www.lequipe.fr/", MON)).sort, null, "on a normal day, after a minute");
 });
