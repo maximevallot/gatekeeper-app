@@ -10,6 +10,8 @@
 // allowVideos (priority 3, top-level pages): a YouTube video a video rule lets through, loaded directly
 //   while YouTube itself is closed. closeVideos (priority 2): a video a video rule closes, sent to the gate
 //   before it loads. Videos opened from inside YouTube never load a page; the tick catches those.
+// allowSites (priority 3, pages and frames): a site with its own limit and time left inside a closed domain
+//   (cooking.nytimes.com while News is closed), since its time counts against nothing else.
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -29,9 +31,12 @@ export function videoFilters(key) {
   return [`||youtube.com/watch?v=${id}^`, `||youtube.com/watch?*&v=${id}^`, `||youtube.com/shorts/${id}^`, `||youtube.com/live/${id}^`, `||youtu.be/${id}^`];
 }
 
-export function buildRules({ redirect = [], block = [], allowVideos = [], closeVideos = [] }, gatePage) {
+export function buildRules({ redirect = [], block = [], allowVideos = [], closeVideos = [], allowSites = [] }, gatePage) {
   let id = 1;
   const rules = [];
+  if (allowSites.length) {
+    rules.push({ id: id++, priority: 3, action: { type: "allow" }, condition: { requestDomains: allowSites, resourceTypes: ["main_frame", "sub_frame"] } });
+  }
   for (const key of allowVideos) {
     for (const urlFilter of videoFilters(key)) {
       rules.push({ id: id++, priority: 3, action: { type: "allow" }, condition: { urlFilter, resourceTypes: ["main_frame"] } });

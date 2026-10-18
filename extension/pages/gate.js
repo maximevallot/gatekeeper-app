@@ -27,7 +27,7 @@ async function show() {
     return;
   }
   document.title = `${d.label || host} closed`;
-  $("site").textContent = d.label ? `${host} · ${d.label}` : host;
+  $("site").textContent = d.site ? `${host} · its own limit` : d.label ? `${host} · ${d.label}` : host;
   const until = `Closed until ${when(d.reopensAt).replace(/^(today|tomorrow) at (.*)$/, "$2 $1")}`;
   if (d.exam) {
     $("headline").textContent = `Exam mode until ${when(d.exam.until).replace(/^(today|tomorrow) at (.*)$/, "$2 $1")}`;

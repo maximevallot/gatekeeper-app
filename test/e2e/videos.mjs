@@ -78,13 +78,13 @@ try {
   const config = join(ext, "config.js");
   writeFileSync(config, readFileSync(config, "utf8").replace(/export const RELAY_URL = ".*";/, `export const RELAY_URL = "http://localhost:${RELAY_PORT}";`));
   const m = JSON.parse(readFileSync(join(ext, "manifest.json"), "utf8"));
-  m.host_permissions.push("http://localhost/*");
+  m.host_permissions.push("http://localhost/*", "*://*.lequipe.fr/*"); // lequipe.fr: as if the browser's yes was given
   writeFileSync(join(ext, "manifest.json"), JSON.stringify(m));
 
   const port = yt.address().port;
   const browser = spawn(BROWSER, ["--headless=new", `--user-data-dir=${join(work, "profile")}`, "--no-first-run", "--no-default-browser-check",
     "--disable-features=DisableLoadExtensionCommandLineSwitch", `--load-extension=${ext}`, `--remote-debugging-port=${CDP_PORT}`,
-    `--host-resolver-rules=MAP www.youtube.com 127.0.0.1:${port}, MAP youtube.com 127.0.0.1:${port}`, "--ignore-certificate-errors", "about:blank"],
+    `--host-resolver-rules=MAP www.youtube.com 127.0.0.1:${port}, MAP youtube.com 127.0.0.1:${port}, MAP www.lequipe.fr 127.0.0.1:${port}`, "--ignore-certificate-errors", "about:blank"],
     { stdio: "ignore" });
   children.push(browser);
 
@@ -174,6 +174,31 @@ try {
   check("an unjudged video waits at the gate, is judged, and stays closed with Video", /gate\.html/.test(music) && /Closed all day/.test(music), music);
   s = await st();
   check("it was judged under no rule", s.judged["yt:MUSICvid001"] && s.judged["yt:MUSICvid001"].rule === null, s.judged["yt:MUSICvid001"]);
+
+  // A site's own limit (Maxime's correction of 2026-10-17), through the relay: his exact sentence gives
+  // "lequipe.fr · 15 min a day · now", with no question about news; "make it 30" then asks the agent.
+  await p.send("Page.navigate", { url: talkUrl }); await sleep(1200);
+  await p.evaluate(`document.getElementById('chat-message').value = 'i want to put a limit on the site lequipe'; document.getElementById('chat-form').requestSubmit();`);
+  await sleep(2000);
+  const lcard = await p.evaluate(`document.getElementById('card') ? document.getElementById('card').innerText : document.getElementById('chat-log').innerText`);
+  check("\"limit lequipe\": the card is lequipe.fr, 15 min a day, now", /lequipe\.fr: 15 min a day/.test(lcard) && /now/i.test(lcard) && !/news/i.test(lcard), lcard);
+  const lreq = mock.requests.filter((r) => r.body.system?.includes("You change the rules")).at(-1);
+  check("the relay was sent the rules with sites' own limits", /sites with their own limit: none/.test(lreq.body.messages[0].content), lreq.body.messages[0].content);
+  await p.evaluate(`document.getElementById('apply').click()`); await sleep(1500);
+  s = await st();
+  check("Apply gives lequipe.fr 15 minutes of its own, and news stays unwatched", s.rules.siteLimits?.["lequipe.fr"] === 15 && !s.rules.kinds.news && !s.rules.sites["lequipe.fr"], s.rules);
+  await p.send("Page.navigate", { url: "https://www.lequipe.fr/Football/" }); await sleep(5500);
+  s = await st();
+  check("lequipe.fr opens, and nothing counts against news", (await p.evaluate("location.href")).startsWith("https://www.lequipe.fr/") && !s.usage.seconds.news, s.usage.seconds);
+  await p.send("Page.navigate", { url: rulesUrl }); await sleep(1200);
+  const lrow = await p.evaluate(`(document.querySelector('[data-site-limit="lequipe.fr"]') || {}).innerText || ''`);
+  check("the rules page has a row for lequipe.fr under the kinds", /lequipe\.fr/.test(lrow) && /15 min/.test(lrow), lrow);
+  await p.send("Page.navigate", { url: talkUrl }); await sleep(1200);
+  await p.evaluate(`document.getElementById('chat-message').value = 'make it 30'; document.getElementById('chat-form').requestSubmit();`);
+  await sleep(2000);
+  const more = await p.evaluate(`(document.getElementById('card') || {}).innerText || ''`);
+  check("\"make it 30\": 15 → 30 is a loosening that asks why", /lequipe\.fr: 15 → 30 min a day/.test(more) && /tomorrow/i.test(more) && /once you've said why/.test(more) && !/browser will ask/.test(more), more);
+  await p.evaluate(`document.getElementById('not-this').click()`); await sleep(800);
 
   // Turning judging off forgets what Claude judged.
   await p.send("Page.navigate", { url: rulesUrl }); await sleep(1200);

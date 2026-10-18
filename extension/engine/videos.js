@@ -10,7 +10,7 @@
 // The rules chat also lives here: it turns the relay's list of operations into the rules the user would
 // have, which then go through proposeRules like any other change.
 
-import { KINDS, hostOf, matches } from "./catalog.js";
+import { KINDS, hostOf, matches, catalogKind } from "./catalog.js";
 
 export const VIDEO_SITES = ["youtube.com"]; // the only site with video rules for now
 export const MAX_VIDEO_RULES = 20;
@@ -150,7 +150,9 @@ export function describeVideoChanges(cur = [], next = []) {
 
 // ---------- the rules chat ----------
 
-const OPS = ["budget", "unwatch", "site", "unsite", "addVideo", "videoBudget", "dropVideo", "dayStart", "examStart", "examEnd"];
+const OPS = ["budget", "unwatch", "site", "unsite", "siteLimit", "dropSiteLimit", "addVideo", "videoBudget", "dropVideo", "dayStart", "examStart", "examEnd"];
+// Earlier names for a site's own limit, from before the relay's were settled: read as the same.
+const ALIASES = { siteBudget: "siteLimit", dropSite: "dropSiteLimit" };
 
 function domainOf(raw) {
   const d = String(raw || "").trim().toLowerCase();
@@ -164,14 +166,16 @@ function domainOf(raw) {
  * outside the catalog lists it in `needsAccess`, since the browser must grant it before it can be closed.
  */
 export function applyDiff(rules, diff) {
-  const r = structuredClone({ kinds: {}, sites: {}, videos: [], ...rules });
+  const r = structuredClone({ kinds: {}, sites: {}, siteLimits: {}, videos: [], ...rules });
   r.videos = r.videos || [];
+  r.siteLimits = r.siteLimits || {};
   const skipped = [], needsAccess = [];
   let examEnd = false;
   let n = r.videos.reduce((m, v) => Math.max(m, Number(v.id.slice(1)) || 0), 0);
   for (const op of Array.isArray(diff) ? diff.slice(0, 10) : []) {
     const kind = op && KINDS[op.kind] ? op.kind : null;
-    switch (op && OPS.includes(op.op) ? op.op : null) {
+    const name = op && (ALIASES[op.op] || op.op);
+    switch (OPS.includes(name) ? name : null) {
       case "budget":
         if (!kind || !Number.isFinite(Number(op.minutes))) { skipped.push(op); break; }
         r.kinds[kind] = { minutes: Math.min(Math.max(Math.round(Number(op.minutes)), 0), 1440) };
@@ -191,6 +195,21 @@ export function applyDiff(rules, diff) {
         const d = domainOf(op.domain);
         if (!d || !(d in r.sites)) { skipped.push(op); break; }
         delete r.sites[d];
+        break;
+      }
+      case "siteLimit": {
+        // A site's own daily minutes, counted against nothing else; null: closed only in exam mode.
+        const d = domainOf(op.domain);
+        const m = op.minutes === null ? null : Number(op.minutes);
+        if (!d || (m !== null && !Number.isFinite(m))) { skipped.push(op); break; }
+        r.siteLimits[d] = m === null ? null : Math.min(Math.max(Math.round(m), 0), 1440);
+        if (!catalogKind(d)) needsAccess.push(d);
+        break;
+      }
+      case "dropSiteLimit": {
+        const d = domainOf(op.domain);
+        if (!d || !(d in r.siteLimits)) { skipped.push(op); break; }
+        delete r.siteLimits[d];
         break;
       }
       case "addVideo": {
@@ -241,6 +260,7 @@ export function rulesForChat(rules) {
   return {
     kinds: Object.fromEntries(Object.entries(rules.kinds || {}).map(([k, v]) => [k, v.minutes])),
     sites: { ...(rules.sites || {}) },
+    siteLimits: { ...(rules.siteLimits || {}) },
     videos: (rules.videos || []).map(({ id, site, about, except, minutes }) => ({ id, site, about, except, minutes })),
     dayStart: rules.dayStart,
   };

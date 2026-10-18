@@ -94,6 +94,20 @@ try {
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(800);
   check("Dark, once chosen, applies to the other pages", (await p.evaluate(`document.documentElement.dataset.theme`)) === "dark");
 
+  // A catalog site with its own limit of 0 while its kind (News) is not watched: closed, with its own row.
+  await p.send("Page.navigate", { url: base + "/pages/rules.html" }); await sleep(1000);
+  await p.evaluate(`(() => { [...document.querySelectorAll('#kinds button.link')].find((b) => /Limit one site/.test(b.textContent)).click();
+    document.getElementById('new-site').value = 'nytimes.com'; document.getElementById('new-kind').value = ''; document.getElementById('site-form').requestSubmit(); })()`);
+  await sleep(1500);
+  for (let i = 0; i < 3; i++) { await p.evaluate(`document.querySelector('[data-site-limit="nytimes.com"] [data-step="-1"]').click()`); await sleep(120); }
+  await sleep(1500);
+  const lim = await sw.evaluate(`chrome.storage.local.get('state').then(r => [r.state.rules.siteLimits, r.state.rules.kinds.news || null])`);
+  check("a site's own limit: nytimes.com at 0 minutes, News still unwatched", lim[0]?.["nytimes.com"] === 0 && lim[1] === null, lim);
+  await sleep(1500);
+  await p.send("Page.navigate", { url: "https://www.nytimes.com/" }); await sleep(1500);
+  check("nytimes.com goes to its own gate", (await p.evaluate("location.href")).includes("/pages/gate.html#https://www.nytimes.com/"), await p.evaluate("location.href"));
+  check("the gate says its own limit closes it", /its own limit/.test(await p.evaluate(`document.getElementById('site').textContent`)) && /Closed all day/.test(await p.evaluate(`document.getElementById('headline').textContent`)));
+
   // Start exam mode from Today (one-model plan, gap 2): it applies at once, and the rules page shows it.
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(800);
   await p.evaluate(`document.getElementById('exam-start').click()`); await sleep(300);

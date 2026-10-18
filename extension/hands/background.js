@@ -128,7 +128,7 @@ async function macExchange(force) {
 async function syncBlocking() {
   const e = engine.enforcement(state, Date.now(), { withheld: await withheldDomains() });
   blind = e.blind;
-  const key = JSON.stringify([e.redirect, e.block, e.allowVideos, e.closeVideos]);
+  const key = JSON.stringify([e.redirect, e.block, e.allowVideos, e.closeVideos, e.allowSites]);
   if (key !== blocking) {
     const old = await chrome.declarativeNetRequest.getDynamicRules();
     await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: old.map((r) => r.id), addRules: buildRules(e, GATE) });

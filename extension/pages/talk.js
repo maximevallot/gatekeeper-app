@@ -36,13 +36,20 @@ function cardView(c) {
   const v = c.view;
   const rows = [...v.now.map((t) => line(t, false)), ...v.later.map((x) => line(x.text, true, x.agent))];
   if (v.later.some((x) => !x.agent)) rows.push(el("div", { class: "small muted" }, `"Tomorrow" means ${clock(v.from)} tomorrow morning, once you've said why.`));
-  if (v.needsAccess.length) rows.push(el("div", { class: "small muted" }, `Your browser will ask to let Gatekeeper see ${v.needsAccess.join(", ")}.`));
+  if (v.needsAccess.length) {
+    const note = el("div", { class: "small muted" }, `Your browser will ask to let Gatekeeper see ${v.needsAccess.join(", ")}.`);
+    chrome.permissions.contains({ origins: v.needsAccess.map((d) => `*://*.${d}/*`) }).then((has) => { if (has) note.remove(); }, () => {});
+    rows.push(note);
+  }
   if (v.skipped) rows.push(el("div", { class: "small muted" }, `${v.skipped} part${v.skipped === 1 ? "" : "s"} of the answer couldn't be used.`));
   const apply = el("button", { class: "btn", type: "button", id: "apply" }, "Apply");
   const not = el("button", { class: "btn ghost", type: "button", id: "not-this" }, "Not this");
   apply.addEventListener("click", async () => {
     // A site outside the catalog needs the browser's yes first, asked inside the click.
-    if (v.needsAccess.length && !(await chrome.permissions.request({ origins: v.needsAccess.map((d) => `*://*.${d}/*`) }).catch(() => false))) {
+    // Only what the browser has not granted yet is asked for.
+    const origins = v.needsAccess.map((d) => `*://*.${d}/*`);
+    const have = origins.length ? await chrome.permissions.contains({ origins }).catch(() => false) : true;
+    if (!have && !(await chrome.permissions.request({ origins }).catch(() => false))) {
       await ask("dropCard"); return;
     }
     await ask("applyCard").catch(() => null);

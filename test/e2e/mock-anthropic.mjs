@@ -31,6 +31,10 @@ function answer(body) {
         ],
       };
     }
+    // Maxime's conversation of 2026-10-17, answered the way prompts/rules.md now asks: a site's own limit.
+    if (/make it 30/i.test(said)) return { reply: "lequipe.fr: 30 minutes a day.", question: null, diff: [{ op: "siteLimit", domain: "lequipe.fr", minutes: 30 }] };
+    if (/only in exam mode/i.test(said)) return { reply: "lequipe.fr: closed only in exam mode.", question: null, diff: [{ op: "siteLimit", domain: "lequipe.fr", minutes: null }] };
+    if (/lequipe/i.test(said)) return { reply: "lequipe.fr: 15 minutes a day.", question: null, diff: [{ op: "siteLimit", domain: "lequipe.fr", minutes: 15 }] };
     return { reply: "", question: "Which sites or videos, and how many minutes a day?", diff: [] };
   }
 const message = /<message>\n([\s\S]*)\n<\/message>/.exec(user)?.[1] ?? "";

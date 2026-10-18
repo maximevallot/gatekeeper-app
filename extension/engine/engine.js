@@ -64,7 +64,7 @@ export function initialState() {
     version: 2,
     setupDone: false,
     goal: "",
-    rules: { kinds: {}, sites: {}, videos: [], dayStart: DEFAULT_DAY_START },
+    rules: { kinds: {}, sites: {}, siteLimits: {}, videos: [], dayStart: DEFAULT_DAY_START },
     pending: null, // { rules, from }: a looser version waiting for the morning
     clock: { floor: 0 }, // the latest time seen; time never goes back
     usage: { day: null, endsAt: 0, seconds: {}, passes: {} }, // passes: kind -> passes granted today
@@ -100,6 +100,7 @@ export function upgrade(state) {
     s.version = 2;
   }
   if (!Array.isArray(s.rules.videos)) s.rules = { ...s.rules, videos: [] };
+  if (!s.rules.siteLimits) s.rules = { ...s.rules, siteLimits: {} };
   // Earlier versions kept loosening apart (loosenLog); it joins the one log.
   if (Array.isArray(state.loosenLog) && state.loosenLog.length) {
     s.log = [...state.loosenLog.map((e) => ({ type: "loosen", ...e })), ...(state.log || [])].slice(-MAX_LOG);
@@ -163,6 +164,22 @@ export function kindOf(state, url) {
   return e ? e.kind : null;
 }
 
+// ---------- a site's own limit ----------
+// One site, or a domain and its subdomains, with its own daily minutes (0: closed; null: no daily limit, closed
+// only in exam mode). Its time counts in its own bucket ("s:lequipe.fr") and against nothing else: not its kind,
+// not another site. The longest matching domain wins, and a site's own limit comes before any kind.
+
+export const siteKey = (domain) => "s:" + domain;
+
+function siteLimitFor(s, host) {
+  if (!host) return null;
+  let best = null;
+  for (const [domain, minutes] of Object.entries(s.rules.siteLimits || {})) {
+    if (matches(host, domain) && (!best || domain.length > best.domain.length)) best = { domain, minutes };
+  }
+  return best;
+}
+
 /** The name a site is sorted under: the host without "www.". */
 export function siteDomain(url) {
   const host = hostOf(url);
@@ -203,7 +220,8 @@ export const HISTORY_DAYS = 30;
 
 function daySummary(s) {
   const seconds = Object.values(s.usage.seconds || {}).reduce((a, b) => a + b, 0);
-  const allowed = Object.values(s.rules.kinds || {}).reduce((a, k) => a + (k.minutes || 0), 0);
+  const allowed = Object.values(s.rules.kinds || {}).reduce((a, k) => a + (k.minutes || 0), 0)
+    + Object.values(s.rules.siteLimits || {}).reduce((a, m) => a + (m || 0), 0);
   const passes = Object.values(s.usage.passes || {}).reduce((a, b) => a + b, 0);
   const kinds = {};
   for (const k of Object.keys(KINDS)) if (s.usage.seconds[k]) kinds[k] = Math.round(s.usage.seconds[k] / 60);
@@ -307,21 +325,51 @@ export function todaySummary(state, now) {
     const status = minutes === 0 ? "closed" : used >= minutes * 60 ? "spent" : "open";
     return { kind: k, label: label(k), short: SHORT[k] || label(k), minutes, left, status, fraction: minutes ? Math.max(0, (minutes * 60 - used) / (minutes * 60)) : 0 };
   });
+  // One row per site with its own limit, under the kinds.
+  const sites = Object.entries(s.rules.siteLimits || {}).sort(([a], [b]) => a.localeCompare(b)).map(([d, minutes]) => {
+    const used = usedSeconds(s, siteKey(d));
+    const short = d.split(".").slice(0, -1).join(".") || d; // "lequipe" under its ring
+    if (minutes === null) return { kind: siteKey(d), site: d, label: d, short, minutes: null, left: null, status: "open", examOnly: true, fraction: 1 };
+    const left = Math.max(0, Math.ceil((minutes * 60 - used) / 60));
+    const status = minutes === 0 ? "closed" : used >= minutes * 60 ? "spent" : "open";
+    return { kind: siteKey(d), site: d, label: d, short, minutes, left, status, fraction: minutes ? Math.max(0, (minutes * 60 - used) / (minutes * 60)) : 0 };
+  });
   const watch = watching(s) ? {
     day: Math.min(WATCH_DAYS, Math.floor((s.clock.floor - s.watch.from) / 86400e3) + 1), of: WATCH_DAYS, until: s.watch.until,
     kinds: Object.keys(KINDS).map((k) => ({ kind: k, label: label(k), short: SHORT[k] || label(k), used: Math.floor(usedSeconds(s, k) / 60) })),
   } : null;
   const exam = examOn(s) ? { ...s.rules.exam } : null;
-  if (exam) for (const k of kinds) { k.status = "closed"; k.exam = true; }
-  return { kinds, goal: s.goal || "", reopensAt: s.usage.endsAt, setupDone: !!s.setupDone, waiting: !!s.pending, watch, watchReady: watchReady(s), exam, offer: examOffer(s, now) };
+  if (exam) for (const k of [...kinds, ...sites]) { k.status = "closed"; k.exam = true; }
+  return { kinds, sites, goal: s.goal || "", reopensAt: s.usage.endsAt, setupDone: !!s.setupDone, waiting: !!s.pending, watch, watchReady: watchReady(s), exam, offer: examOffer(s, now) };
 }
 
 const usedSeconds = (s, kind) => s.usage.seconds[kind] || 0;
 
 function passFor(s, url, kind) {
-  const e = entryFor(s, hostOf(url));
+  const lim = siteLimitFor(s, hostOf(url));
+  const e = lim || entryFor(s, hostOf(url));
   const p = e && (s.passes || {})[e.domain];
   return p && p.kind === kind && p.secondsLeft > 0 ? p : null;
+}
+
+/** The decision for a site with its own limit: its own minutes, its own bucket, its own gate. */
+function siteDecision(s, url, title, lim) {
+  const key = siteKey(lim.domain);
+  const used = usedSeconds(s, key);
+  const base = { kind: key, bucket: key, site: lim.domain, label: lim.domain, title, usedMinutes: Math.floor(used / 60), reopensAt: s.usage.endsAt };
+  const pass = passFor(s, url, key);
+  if (examOn(s)) {
+    // Exam mode closes a site's own limit too, null ("only in exam mode") included.
+    if (pass) return { ...base, verdict: "allow", watched: true, pass: true, exam: { ...s.rules.exam }, leftMinutes: Math.ceil(pass.secondsLeft / 60) };
+    return { ...base, verdict: "block", watched: true, exam: { ...s.rules.exam }, budgetMinutes: lim.minutes, reopensAt: s.rules.exam.until };
+  }
+  if (lim.minutes === null) return { ...base, verdict: "allow", watched: false };
+  const budget = lim.minutes * 60;
+  const d = { ...base, watched: true, budgetMinutes: lim.minutes, leftMinutes: Math.max(0, Math.ceil((budget - used) / 60)) };
+  if (watching(s)) return { ...d, verdict: "allow", watching: true };
+  if (pass) return { ...d, verdict: "allow", pass: true, leftMinutes: Math.ceil(pass.secondsLeft / 60) };
+  if (lim.minutes === 0) return { ...d, verdict: "block" };
+  return { ...d, verdict: used >= budget ? "gate" : "allow" };
 }
 
 // ---------- the decision ----------
@@ -336,6 +384,8 @@ export function decide(state, { url, title = "", now }) {
     // Exam mode closes every kind, watched or not, until it ends; a video rule that makes videos free still holds.
     const video = videoDecision(s, url, title);
     if (video && video.verdict === "allow" && !video.watched) return video;
+    const lim = siteLimitFor(s, hostOf(url));
+    if (lim) return siteDecision(s, url, title, lim);
     const kind = kindOf(s, url);
     if (KINDS[kind]) {
       // A pass the gate gave for this page because it serves the exam (decision of 2026-10-17).
@@ -346,13 +396,16 @@ export function decide(state, { url, title = "", now }) {
     }
     return { verdict: "allow", kind, watched: false };
   }
+  const lim = siteLimitFor(s, hostOf(url));
   if (watching(s)) {
     // The watch week counts every kind and blocks nothing.
+    if (lim) return siteDecision(s, url, title, lim);
     const kind = kindOf(s, url);
     return KINDS[kind] ? { verdict: "allow", kind, bucket: kind, label: label(kind), watched: true, watching: true } : { verdict: "allow", kind, watched: false };
   }
   const video = videoDecision(s, url, title);
   if (video) return video;
+  if (lim) return siteDecision(s, url, title, lim);
   const kind = kindOf(s, url);
   const rule = kind && s.rules.kinds[kind];
   if (!rule) return { verdict: "allow", kind, watched: false };
@@ -526,18 +579,40 @@ export function watchedDomains(state) {
   for (const [k, def] of Object.entries(KINDS)) if (watched(k)) out.push(...def.domains);
   for (const [d, k] of Object.entries(state.rules.sites || {})) if (watched(k)) out.push(d);
   for (const [d, k] of Object.entries(state.sorted || {})) if (watched(k)) out.push(d);
-  // A site the user moved to an unwatched kind is not caught by its catalog entry.
-  return [...new Set(out)].filter((d) => watched(kindOf(state, "https://" + d + "/")));
+  for (const d of Object.keys(state.rules.siteLimits || {})) out.push(d);
+  return [...new Set(out)].filter((d) => watchedDomain(state, d));
+}
+
+// Whether one domain is watched: by its own limit first (null: only in exam mode), else by its kind. A site the
+// user moved to an unwatched kind is not caught by its catalog entry.
+function watchedDomain(state, d) {
+  const lim = siteLimitFor(state, d);
+  if (lim) return lim.minutes !== null || examOn(state);
+  const k = kindOf(state, "https://" + d + "/");
+  return !!KINDS[k] && (examOn(state) || !!state.rules.kinds[k]);
 }
 
 export function closedDomains(state, now) {
   const s = rollover(state, now);
   const closed = new Set(closedKinds(s, now));
   return watchedDomains(s).filter((d) => {
+    const lim = siteLimitFor(s, d);
+    if (lim) return decide(s, { url: "https://" + d + "/", now }).verdict !== "allow";
     const kind = kindOf(s, "https://" + d + "/");
     const p = (s.passes || {})[d];
     return closed.has(kind) && !(p && p.kind === kind && p.secondsLeft > 0);
   });
+}
+
+/**
+ * Sites with their own limit and time left that lie inside a closed domain (cooking.nytimes.com with News
+ * closed): the hands let them through above the domain's block, since they count against nothing else.
+ */
+export function openInsideClosed(state, now) {
+  const s = rollover(state, now);
+  const closed = closedDomains(s, now);
+  return Object.keys(s.rules.siteLimits || {}).filter((d) => !closed.includes(d) && closed.some((c) => c !== d && matches(d, c))
+    && decide(s, { url: "https://" + d + "/", now }).verdict === "allow");
 }
 
 /**
@@ -568,7 +643,7 @@ export function enforcement(state, now, { withheld = [] } = {}) {
     else closeVideos.push(key);
   }
   return {
-    redirect: closed, block: [...new Set([...closed, ...blind])], blind,
+    redirect: closed, block: [...new Set([...closed, ...blind])], blind, allowSites: openInsideClosed(s, now).filter((d) => !hidden.has(d)),
     allowVideos: allowVideos.slice(0, MAX_ALLOWED_VIDEOS), closeVideos: closeVideos.slice(0, MAX_ALLOWED_VIDEOS),
   };
 }
@@ -585,11 +660,16 @@ export function cleanRules(rules, fallback) {
     const host = hostOf("https://" + String(d) + "/");
     if (host && host.includes(".") && KINDS[k]) sites[host.replace(/^www\./, "")] = k;
   }
+  const siteLimits = {};
+  for (const [d, m] of Object.entries(r.siteLimits || {})) {
+    const host = hostOf("https://" + String(d) + "/");
+    if (host && host.includes(".")) siteLimits[host.replace(/^www\./, "")] = m === null ? null : clampMinutes(m);
+  }
   const ds = Number(r.dayStart);
   const dayStart = Number.isInteger(ds) && ds >= 0 && ds <= 23 ? ds : fallback.dayStart;
   const e = r.exam;
   const exam = e && Number.isFinite(Number(e.until)) ? { until: Number(e.until), goal: String(e.goal || "").replace(/\s+/g, " ").trim().slice(0, 200) } : null;
-  return { kinds, sites, videos: cleanVideos(r.videos), dayStart, exam };
+  return { kinds, sites, siteLimits, videos: cleanVideos(r.videos), dayStart, exam };
 }
 
 /**
@@ -614,13 +694,37 @@ export function tighten(cur, next, state) {
     const pick = stricter ? next.sites : cur.sites;
     if (pick && d in pick) sites[d] = pick[d];
   }
+  // A site's own limit applies now only if it leaves no more time today and no more a day than what the site
+  // falls under without it (its kind, or nothing), and still closes it in exam mode if that did. Adding a limit
+  // to a site whose kind is spent, raising one, or removing one waits.
+  const siteLimits = {};
+  const curLimits = cur.siteLimits || {}, nextLimits = next.siteLimits || {};
+  const under = (limits, d) => {
+    const st = { ...state, rules: { ...cur, kinds, sites, siteLimits: limits } };
+    const lim = siteLimitFor(st, d);
+    if (lim) {
+      if (lim.minutes === null) return { left: Infinity, perDay: Infinity, exam: true };
+      const used = usedSeconds(st, siteKey(lim.domain));
+      return { left: lim.minutes === 0 ? 0 : Math.max(0, lim.minutes * 60 - used), perDay: lim.minutes, exam: true };
+    }
+    const k = kindOf(st, "https://" + d + "/");
+    return { left: left(k), perDay: perDay(k), exam: !!KINDS[k] };
+  };
+  for (const d of new Set([...Object.keys(curLimits), ...Object.keys(nextLimits)])) {
+    const asked = { ...curLimits };
+    if (d in nextLimits) asked[d] = nextLimits[d]; else delete asked[d];
+    const a = under(curLimits, d), b = under(asked, d);
+    const stricter = b.left <= a.left && b.perDay <= a.perDay && (b.exam || !a.exam);
+    const pick = stricter ? nextLimits : curLimits;
+    if (d in pick) siteLimits[d] = pick[d];
+  }
   const youtube = kindUnder(cur, "youtube.com"); // the kind YouTube's own pages count against today
   const videos = tightenVideos(cur.videos || [], next.videos || [], { watched: !!(youtube && kinds[youtube]) });
   // Exam mode in force can only be extended now; ending or shortening it waits (the sentence ends it at once).
   const t = (state.clock && state.clock.floor) || 0;
   const a = cur.exam && cur.exam.until > t ? cur.exam : null, b = next.exam || null;
   const exam = a ? (b && b.until >= a.until ? b : a) : b;
-  return { ...next, kinds, sites, videos, dayStart: cur.dayStart, exam };
+  return { ...next, kinds, sites, siteLimits, videos, dayStart: cur.dayStart, exam };
 }
 
 function canon(v) {
@@ -646,6 +750,16 @@ export function describeChanges(cur, next) {
     else if (!a && b) out.push({ site: d, text: `${d}: counted as ${label(b).toLowerCase()}` });
     else if (a !== b) out.push({ site: d, text: `${d}: ${label(a).toLowerCase()} → ${label(b).toLowerCase()}` });
   }
+  const limits = new Set([...Object.keys(cur.siteLimits || {}), ...Object.keys(next.siteLimits || {})]);
+  for (const d of limits) {
+    const has = (r) => !!r.siteLimits && d in r.siteLimits;
+    const a = has(cur) ? cur.siteLimits[d] : undefined, b = has(next) ? next.siteLimits[d] : undefined;
+    if (a === b) continue;
+    if (b === undefined) out.push({ siteLimit: d, text: `${d}: limit removed` });
+    else if (a === undefined) out.push({ siteLimit: d, text: `${d}: ${siteLimitText(b)}` });
+    else if (a && b) out.push({ siteLimit: d, text: `${d}: ${a} → ${b} min a day` });
+    else out.push({ siteLimit: d, text: `${d}: ${siteLimitText(a)} → ${siteLimitText(b)}` });
+  }
   out.push(...describeVideoChanges(cur.videos || [], next.videos || []));
   if (cur.dayStart !== next.dayStart) out.push({ text: `The day starts at ${next.dayStart}:00` });
   const ea = cur.exam || null, eb = next.exam || null;
@@ -654,6 +768,10 @@ export function describeChanges(cur, next) {
     out.push({ text: eb ? `Exam mode until ${until(eb)}` : "Exam mode ends" });
   }
   return out;
+}
+
+export function siteLimitText(m) {
+  return m === null ? "closed only in exam mode" : minutesText(m);
 }
 
 export function minutesText(m) {
@@ -738,7 +856,8 @@ export function gateRequest(state, { url, message, now }) {
   if (!text) return { refused: "empty" };
   return {
     payload: {
-      installId: s.installId, goal: s.goal || "", site: siteDomain(url), kind: d.kind,
+      // A site with its own limit is sent as kind "site" (its minutes are its own, not a kind's).
+      installId: s.installId, goal: s.goal || "", site: d.site || siteDomain(url), kind: d.site ? "site" : d.kind,
       minutesUsed: Math.min(d.usedMinutes || 0, 1440), budget: d.budgetMinutes ?? 0, deadlines: deadlines(s, t),
       // In exam mode the gate gives a pass only for a page that serves the exam (shared names, one-model step 1).
       exam: examForRelay(s), now: localIso(t),
@@ -759,7 +878,8 @@ export function applyGateAnswer(state, { url, answer, now }) {
   if (!ok) return { state, result: { decision: "error" } };
   let s = rollover(state, now);
   const t = s.clock.floor;
-  const e = entryFor(s, hostOf(url));
+  const lim = siteLimitFor(s, hostOf(url));
+  const e = lim ? { domain: lim.domain, kind: siteKey(lim.domain) } : entryFor(s, hostOf(url));
   if (!e) return { state, result: { decision: "error" } };
   const kind = e.kind;
   const { [kind]: _, ...followUps } = s.followUps || {};

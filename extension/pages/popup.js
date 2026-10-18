@@ -39,7 +39,9 @@ async function show() {
     $("mode").textContent = "Your week is ready"; $("mode").className = "pill ok";
     $("mode").onclick = () => openTab("week.html?ready=1");
   }
-  $("rings").replaceChildren(...(t.kinds.length ? t.kinds.map((k) => ring(k, t.reopensAt))
+  // A ring per watched kind, then one per site with its own limit (one closed only in exam mode shows in exam mode).
+  const rings = [...t.kinds, ...(t.sites || []).filter((k) => k.minutes !== null || k.exam)];
+  $("rings").replaceChildren(...(rings.length ? rings.map((k) => ring(k, t.reopensAt))
     : [el("p", { class: "lead", style: "grid-column: 1 / -1" }, "Nothing is watched yet.")]));
   $("goal").textContent = t.goal;
   $("goal-card").classList.toggle("hidden", !t.goal);

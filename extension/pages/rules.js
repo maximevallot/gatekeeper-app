@@ -1,6 +1,6 @@
 // Your rules, saved as you go. Every change goes through the engine's proposeRules: what tightens applies
 // now, what loosens waits for the morning and shows as an amber row with a way to keep today's number.
-import { KINDS, KIND_ORDER } from "../engine/catalog.js";
+import { KINDS, KIND_ORDER, catalogKind } from "../engine/catalog.js";
 import { DEFAULT_MINUTES, label, examOn } from "../engine/engine.js";
 import { videoName } from "../engine/videos.js";
 import {
@@ -102,6 +102,47 @@ function kindRow(kind, rules, state) {
   return el("div", { class: "rowblock", "data-kind": kind }, ...parts);
 }
 
+// ---------- a site's own limit ----------
+// One row per site with its own daily minutes, under the kinds. Its time counts against nothing else.
+
+function setLimit(d, minutes) {
+  const r = wanted();
+  r.siteLimits = { ...(r.siteLimits || {}) };
+  if (minutes === undefined) delete r.siteLimits[d]; else r.siteLimits[d] = minutes;
+  propose(r);
+}
+
+function siteRow(d, rules, state) {
+  const has = (x) => !!x.siteLimits && d in x.siteLimits;
+  const want = has(rules) ? rules.siteLimits[d] : undefined;
+  const inForce = has(state.rules) ? state.rules.siteLimits[d] : undefined;
+  const value = want !== undefined ? want : inForce;
+  const examOnly = value === null;
+  const step = examOnly ? el("div", { class: "pill" }, "Exam mode only") : stepper({
+    value, label: d,
+    onChange: (m) => { clearTimeout(timers["s:" + d]); timers["s:" + d] = setTimeout(() => setLimit(d, m), 450); },
+  });
+  const toggle = el("button", { class: "link", type: "button", "data-exam-only": d }, examOnly ? "Give it daily minutes" : "Only in exam mode");
+  toggle.addEventListener("click", () => setLimit(d, examOnly ? DEFAULT_MINUTES : null));
+  const remove = el("button", { class: "link", type: "button", "data-remove-site": d }, "Remove");
+  remove.addEventListener("click", () => setLimit(d, undefined));
+  const head = el("div", { class: "row", style: "padding: 0" },
+    el("div", { class: "stack" }, el("div", { class: "name" }, d),
+      el("div", { class: "sub" }, examOnly ? "Open every day; closed in exam mode" : "Its own limit, apart from any kind"),
+      el("div", { class: "sub" }, toggle, " · ", remove)),
+    step);
+  const parts = [head];
+  const now = got.state.pending && got.state.pending.from;
+  const asking = got.state.pending && got.state.pending.ok === false;
+  const says = (m) => (m === undefined ? "No own limit" : m === null ? "Exam mode only" : m === 0 ? "Closed" : `${m} min`);
+  if (inForce !== want && got.state.pending) {
+    const keepIt = el("button", { class: "link", type: "button", onclick: () => setLimit(d, inForce) }, inForce === undefined ? "Don't add" : `Keep ${says(inForce).toLowerCase()}`);
+    parts.push(el("div", { class: "note", "data-pending": "s:" + d },
+      el("span", {}, `${says(want)} ${asking ? "once Gatekeeper agrees, from the next morning" : when(now)}`), keepIt));
+  }
+  return el("div", { class: "rowblock", "data-site-limit": d }, ...parts);
+}
+
 function renderKinds() {
   const { state } = got;
   const rules = wanted();
@@ -115,6 +156,8 @@ function renderKinds() {
       el("div", { class: "stack" }, el("div", { class: "name" }, "YouTube videos"), el("div", { class: "sub" }, "Video isn't watched; these rules still apply.")),
       chips));
   }
+  const limited = [...new Set([...Object.keys(rules.siteLimits || {}), ...Object.keys(state.rules.siteLimits || {})])].sort();
+  rows.push(...limited.map((d) => siteRow(d, rules, state)));
   if (unwatched.length) {
     const links = unwatched.flatMap((k, i) => {
       const b = el("button", { class: "link", type: "button", "data-add": k }, KINDS[k].label);
@@ -130,10 +173,11 @@ function renderKinds() {
 function addSiteRow() {
   const form = el("form", { class: "inline hidden", id: "site-form" },
     el("input", { class: "field", id: "new-site", placeholder: "example.com", autocomplete: "off", "aria-label": "A site to add" }),
-    el("select", { class: "field", id: "new-kind", style: "flex: 0 0 140px", "aria-label": "Its kind" },
-      ...KIND_ORDER.map((k) => el("option", { value: k }, KINDS[k].label))),
+    el("select", { class: "field", id: "new-kind", style: "flex: 0 0 140px", "aria-label": "Its limit" },
+      el("option", { value: "" }, "Its own limit"),
+      ...KIND_ORDER.map((k) => el("option", { value: k }, `Counts as ${KINDS[k].label.toLowerCase()}`))),
     el("button", { class: "btn", type: "submit" }, "Add"));
-  const open = el("button", { class: "link", type: "button", style: "align-self: flex-start" }, "Add a site Gatekeeper doesn't know");
+  const open = el("button", { class: "link", type: "button", style: "align-self: flex-start" }, "Limit one site");
   open.addEventListener("click", () => { form.classList.remove("hidden"); open.classList.add("hidden"); $("new-site").focus(); });
   form.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -142,8 +186,10 @@ function addSiteRow() {
     if (!d.includes(".")) return;
     const kind = $("new-kind").value;
     // Gatekeeper may act only on the sites in its catalog; any other is asked for here, inside the click.
-    chrome.permissions.request({ origins: [`*://*.${d}/*`] }).then((granted) => {
+    const access = kind || !catalogKind(d) ? chrome.permissions.request({ origins: [`*://*.${d}/*`] }) : Promise.resolve(true);
+    access.then((granted) => {
       if (!granted) { saved(`Not added: Gatekeeper needs access to ${d}`); return; }
+      if (!kind) { setLimit(d, DEFAULT_MINUTES); return; } // its own limit, counted against nothing else
       const r = wanted();
       r.sites = { ...(r.sites || {}), [d]: kind };
       propose(r);
