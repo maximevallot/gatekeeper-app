@@ -17,6 +17,9 @@ process.on("exit", () => { try { browser.kill(); } catch {} try { rmSync(work, {
 try {
   const ext = join(work, "extension");
   cpSync(fileURLToPath(new URL("../../extension", import.meta.url)), ext, { recursive: true });
+  // No relay in this run: the relay address goes nowhere, as for an install that is offline (this is how the
+  // fresh-install clock bug of 2026-10-18 shows).
+  { const cfg = join(ext, "config.js"); writeFileSync(cfg, readFileSync(cfg, "utf8").replace(/export const RELAY_URL = ".*";/, 'export const RELAY_URL = "http://127.0.0.1:9";')); }
   const bg = join(ext, "hands", "background.js");
   writeFileSync(bg, readFileSync(bg, "utf8").replace('(await chrome.idle.queryState(IDLE_SECONDS)) === "active"', "true"));
   browser = spawn(BROWSER, ["--headless=new", `--user-data-dir=${join(work, "profile")}`, "--no-first-run", "--no-default-browser-check",

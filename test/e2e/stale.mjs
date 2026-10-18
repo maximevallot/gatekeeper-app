@@ -20,6 +20,9 @@ process.on("exit", () => { try { browser.kill(); } catch {} (() => { try { rmSyn
 try {
   const ext = join(work, "extension");
   cpSync(join(repo, "extension"), ext, { recursive: true });
+  // No relay in this run: the relay address goes nowhere, as for an install that is offline (this is how the
+  // fresh-install clock bug of 2026-10-18 shows).
+  { const cfg = join(ext, "config.js"); writeFileSync(cfg, readFileSync(cfg, "utf8").replace(/export const RELAY_URL = ".*";/, 'export const RELAY_URL = "http://127.0.0.1:9";')); }
   // The old worker runs its own old engine, as a worker started before the update does from memory, while
   // the pages load today's files.
   for (const f of ["hands/background.js", "hands/blocker.js", "engine/engine.js", "engine/catalog.js"]) {
