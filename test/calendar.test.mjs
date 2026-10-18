@@ -71,11 +71,15 @@ test("Maxime's re-test: a Google share link is refused with Google's steps; a pa
   assert.ok(isIcs(ICS) && !isIcs("<html>Sign in</html>"));
   const s = recordCalendar(setCalendar(setUp(), "https://example.edu/feed.ics").state, "<html>Sign in</html>", MON);
   assert.equal(s.calendar.error, "not_ical");
-  assert.deepEqual(calendarStatus(s), { status: "not_working", lastRead: "2026-10-19T20:00:00-04:00", events: 0 });
-  // The chat knows the calendar's state, and only that: no link, no titles.
+  assert.deepEqual(calendarStatus(s), { status: "failed", readAt: null }, "never read fine");
+  // The chat's calendar state: only that, no link, no titles; and not sent until the privacy policy lists it.
   const ok = { ...withCal(), installId: "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f" };
   const payload = chatRequest(setHelp(ok, true), { message: "are you connected to my calendar now?", now: MON }).payload;
-  assert.deepEqual(payload.calendar, { status: "connected", lastRead: "2026-10-19T20:00:00-04:00", events: 3 });
+  const { SEND_CALENDAR_STATUS } = await import("../extension/engine/engine.js");
+  assert.equal("calendar" in payload, SEND_CALENDAR_STATUS);
+  assert.deepEqual(calendarStatus(ok), { status: "connected", readAt: "2026-10-19T20:00:00-04:00" });
+  const failedLater = recordCalendar(ok, "<html>Sign in</html>", MON + 86400e3);
+  assert.deepEqual(calendarStatus(failedLater), { status: "failed", readAt: "2026-10-19T20:00:00-04:00" }, "readAt stays the last good read");
   assert.ok(!JSON.stringify(payload).includes("canvas.mit.edu") && !JSON.stringify(payload).includes("Midterm"));
-  assert.deepEqual(chatRequest(setHelp({ ...setUp(), installId: "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f" }, true), { message: "hi", now: MON }).payload.calendar, { status: "none", lastRead: null, events: 0 });
+  assert.deepEqual(calendarStatus(setUp()), { status: "none", readAt: null });
 });

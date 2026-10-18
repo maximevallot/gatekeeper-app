@@ -1264,8 +1264,9 @@ export function chatRequest(state, { message, history = [], now }) {
       // A no holds every loosening until the morning: the relay then drops loosening ops and says so (QA round 3, N1).
       // A no now holds only its own rule (2026-10-18), so loosening as a whole is never locked; the card says which.
       loosenLocked: false,
-      // So "are you connected to my calendar?" gets a true answer (Maxime's re-test): the state only.
-      calendar: calendarStatus(s),
+      // So "are you connected to my calendar?" gets a true answer (Maxime's re-test): the state only. Off until the
+      // privacy policy's chat row lists it (/privacy/0.2 doesn't); the relay then says it can't see the calendar.
+      ...(SEND_CALENDAR_STATUS ? { calendar: calendarStatus(s) } : {}),
     },
   };
 }
@@ -1624,7 +1625,7 @@ export function recordCalendar(state, text, now) {
   if (!isIcs(text)) return calendarFailed(state, "not_ical", now);
   const t = Math.max(now, (state.clock && state.clock.floor) || 0);
   const events = parseIcs(text).filter((e) => e.start >= t - 3600e3 && e.start <= t + 14 * 86400e3).slice(0, 50).map(({ title, start }) => ({ title, start }));
-  return { ...state, calendar: { ...c, events, fetchedAt: t, error: null } };
+  return { ...state, calendar: { ...c, events, fetchedAt: t, readAt: t, error: null } };
 }
 
 export function calendarFailed(state, error, now) {
@@ -1634,11 +1635,18 @@ export function calendarFailed(state, error, now) {
   return { ...state, calendar: { ...c, fetchedAt: t, error: String(error).slice(0, 80) } };
 }
 
-/** The calendar's state for the chat (/rules): connected or not working, when last read, how many events. No link, no titles. */
+/** Send the calendar's state to the chat. Turn on once the privacy policy's chat row says "whether a calendar is connected". */
+export const SEND_CALENDAR_STATUS = false;
+
+/**
+ * The calendar's state for the chat (/rules, the relay's names): connected, failed or none, and when it was last read
+ * fine. Never the link, never an event.
+ */
 export function calendarStatus(state) {
   const c = state.calendar;
-  if (!c) return { status: "none", lastRead: null, events: 0 };
-  return { status: c.error || !c.fetchedAt ? "not_working" : "connected", lastRead: c.fetchedAt ? localIso(c.fetchedAt) : null, events: (c.events || []).length };
+  if (!c) return { status: "none", readAt: null };
+  const okAt = c.readAt || (!c.error && c.fetchedAt) || 0;
+  return { status: c.error || !c.fetchedAt ? "failed" : "connected", readAt: okAt ? localIso(okAt) : null };
 }
 
 /** The next deadlines for the gate: up to five, title and date. */
