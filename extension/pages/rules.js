@@ -32,7 +32,7 @@ async function propose(rules, extra = {}, undoable = true) {
     const r = await ask("propose", { rules, ...extra });
     const tightened = r.now && r.now.length;
     saved(r.refused === "asked_today" ? "Gatekeeper said no to a loosening today. Ask again tomorrow."
-      : r.refused === "help_off_today" ? "Claude help was turned off today, so nothing loosens until tomorrow."
+      : r.refused === "help_off_today" ? "AI help was turned off today, so nothing loosens until tomorrow."
       : r.needsOk ? "Saved. To loosen it, tell Gatekeeper why."
       : r.later && r.later.length ? `Saved. Loosening applies ${when(r.from)}.` : tightened ? "Saved" : "Saved",
     undoable && tightened ? before : null);
@@ -46,7 +46,7 @@ async function propose(rules, extra = {}, undoable = true) {
 
 function subtitle(kind, rules, state) {
   const own = Object.entries(rules.sites || {}).filter(([, k]) => k === kind).map(([d]) => `${d} (you added)`);
-  const sorted = Object.entries(state.sorted || {}).filter(([d, k]) => k === kind && !(d in (rules.sites || {}))).map(([d]) => `${d} (sorted by Claude)`);
+  const sorted = Object.entries(state.sorted || {}).filter(([d, k]) => k === kind && !(d in (rules.sites || {}))).map(([d]) => `${d} (sorted by AI help)`);
   const known = KINDS[kind].examples.split(", ");
   const total = KINDS[kind].domains.length + own.length + sorted.length;
   const shown = [...known.slice(0, 3), ...own.slice(0, 2), ...sorted.slice(0, 1)];
@@ -237,7 +237,7 @@ $("help").addEventListener("change", () => {
   // Access to every site is asked only where it is first needed, when exam mode starts (tester run, #4); turning
   // AI help on doesn't ask for it.
   Promise.resolve().then(async () => {
-    try { await ask("consent", { help: on }); saved(on ? "Claude help is on" : "Claude help is off: nothing is sent"); }
+    try { await ask("consent", { help: on }); saved(on ? "AI help is on" : "AI help is off: nothing is sent"); }
     catch { saved("Not saved: Gatekeeper's background didn't answer"); }
     await load();
   });
@@ -271,7 +271,7 @@ function renderExam() {
   // Everything but study is closed; sites Gatekeeper doesn't know can only be closed where it may see every site.
   $("exam-goal").textContent = (s.rules.exam.goal ? s.rules.exam.goal + ". " : "") + (got.seeAll
     ? "Everything but study sites is closed until then."
-    : "Every kind of site is closed until then. Sites Gatekeeper doesn't know stay open: turn on Claude help and let it see all sites to close them.");
+    : "Every kind of site is closed until then. Sites Gatekeeper doesn't know stay open: let Gatekeeper see all sites to close them.");
   // The Mac app's "End exam mode early" opens this page at #exam.
   if (location.hash === "#exam" && !renderExam.opened) { renderExam.opened = true; $("exam-end-open").focus(); }
 }
@@ -292,7 +292,7 @@ $("exam-end-open").addEventListener("click", async () => {
   const r = await ask("endExam").catch(() => ({ refused: "unreachable" }));
   const note = {
     ends_anyway: `It ends ${when(r.until)} anyway, before the next morning. Nothing to ask.`,
-    help_off: `With Claude help off, exam mode runs to its end, ${when(r.until)}.`,
+    help_off: `With AI help off, exam mode runs to its end, ${when(r.until)}.`,
     asked_today: "Gatekeeper said no to that today. Ask again tomorrow.",
     not_on: "Exam mode is already off.",
     unreachable: "Not saved: Gatekeeper's background didn't answer.",

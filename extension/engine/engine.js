@@ -1555,10 +1555,10 @@ export function applyCard(state, now) {
     exam = endExam(s, now);
     s = exam.state;
     text = exam.needsOk ? "To end exam mode early, tell me why. Once your exam's time has come, it can end now; before that, tomorrow morning at the earliest."
-      : { ends_anyway: `Exam mode ends at ${hhmm(exam.until)} anyway.`, help_off: `With Claude help off, exam mode runs to its end at ${hhmm(exam.until)}.`,
+      : { ends_anyway: `Exam mode ends at ${hhmm(exam.until)} anyway.`, help_off: `With AI help off, exam mode runs to its end at ${hhmm(exam.until)}.`,
           asked_today: "I said no to ending it today. You can ask again tomorrow.", not_on: "Exam mode is already off." }[exam.refused] || "Nothing changed.";
   } else if (r.refused === "asked_today") text = `I said no to a loosening today${r.now.length ? "; the stricter part applies now" : ""}. You can ask again tomorrow.`;
-  else if (r.refused === "help_off_today") text = `Claude help was turned off today, so nothing loosens until tomorrow${r.now.length ? "; the stricter part applies now" : ""}.`;
+  else if (r.refused === "help_off_today") text = `AI help was turned off today, so nothing loosens until tomorrow${r.now.length ? "; the stricter part applies now" : ""}.`;
   else if (r.needsOk) text = `${r.now.length ? "The stricter part applies now. " : ""}To loosen the rest, tell me why: what changed?`;
   else if (r.later.length) text = `Done. ${r.now.length ? "Some of it applies now; the rest " : "It "}applies tomorrow at ${hhmm(r.from)}.`;
   else text = "Done. It applies now.";

@@ -87,10 +87,10 @@ $("start").addEventListener("click", async () => {
   $("summary").textContent = Object.entries(kinds).map(([k, m]) => `${label(k)}: ${minutesText(m)}`).join(". ") + ".";
   // Say what actually leaves the browser, from what was saved, not from what was ticked.
   $("done-privacy").textContent = on
-    ? "Claude help is on: only what you asked it for is sent, and only when it's needed. Everything else stays in this browser."
+    ? "AI help is on: only what you asked it for is sent, and only when it's needed. Everything else stays in this browser."
     : NOTHING_LEAVES;
   if (!saved || on !== help) {
-    $("done-error").textContent = "Claude help wasn't saved. You can turn it on in your rules.";
+    $("done-error").textContent = "AI help wasn't saved. You can turn it on in your rules.";
     $("done-error").classList.remove("hidden");
   }
   $("ask").classList.add("hidden");

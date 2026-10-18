@@ -360,7 +360,7 @@ const handlers = {
     const preview = r.ok ? engine.chatPreview(await load(), r.data, Date.now()) : null;
     if (!r.ok || preview.error) {
       const failed = r.ok ? preview.error : r.error || "unreachable";
-      await update((s) => ({ state: engine.addTurn(s, "gatekeeper", failed === "daily_limit" ? "That's enough changes by talking for today." : "Can't reach Claude right now. Your rules page still works.", Date.now()) }));
+      await update((s) => ({ state: engine.addTurn(s, "gatekeeper", failed === "daily_limit" ? "That's enough changes by talking for today." : "Gatekeeper can't be reached right now. Your rules page still works.", Date.now()) }));
       return { failed };
     }
     await update((s) => ({ state: engine.recordChatAnswer(s, r.data, preview, Date.now()) }));
