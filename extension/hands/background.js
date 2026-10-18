@@ -5,7 +5,8 @@
 import * as engine from "../engine/engine.js";
 import { videoUrl, videoKeyOf } from "../engine/videos.js";
 import { buildRules } from "./blocker.js";
-import { callRelay, relayTime } from "./relay.js";
+import { callRelay, relayTime, callAccount } from "./relay.js";
+import * as account from "../engine/account.js";
 import { PROTOCOL } from "../protocol.js";
 
 const TICK_MS = 2000;
@@ -27,6 +28,7 @@ async function load() {
   if (!state) {
     // The hands guard the clock: a jump is checked against the relay's time before it counts (QA round 2, C1).
     state = engine.guardClock(engine.upgrade((await chrome.storage.local.get("state")).state));
+    await loadAccount();
     if (!state.installId) {
       state = { ...state, installId: crypto.randomUUID() };
       await chrome.storage.local.set({ state });
@@ -72,6 +74,128 @@ async function checkTime() {
   if (t) await update((s) => ({ state: engine.confirmTime(s, t) }));
 }
 
+// ---------- the account (one Gatekeeper per person, contract version 1) ----------
+// The account on the relay holds the one true state. This browser keeps a copy, decides every page from it, and
+// syncs about every 30 seconds and right after anything the user does: spans of time and requests go up, a fresh
+// copy comes down. Its token and the outbox live in storage of their own, never inside the state that is sent.
+
+const SYNC_MS = 30e3;
+const MAX_SPANS = 20000; // about a day of ticks, if offline that long
+let acct = null; // { accountId, deviceId, token, version, lastSync, error, created }
+let outbox = { seq: 0, sentUpTo: 0, spans: [], requests: [] };
+let reqN = 0;
+
+async function loadAccount() {
+  const r = await chrome.storage.local.get(["account", "outbox"]);
+  acct = r.account || null;
+  outbox = r.outbox || { seq: 0, sentUpTo: 0, spans: [], requests: [] };
+}
+const saveAccount = () => chrome.storage.local.set({ account: acct, outbox });
+
+/** "Brave on Mac": shown in the account's device list. */
+function deviceName() {
+  const brands = ((navigator.userAgentData && navigator.userAgentData.brands) || []).map((b) => b.brand);
+  const ua = navigator.userAgent;
+  const browser = brands.find((b) => /Brave|Edge|Opera|Vivaldi/.test(b)) || (/Safari/.test(ua) && !/Chrom/.test(ua) ? "Safari" : brands.includes("Google Chrome") ? "Chrome" : "Chrome");
+  const os = /Mac/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /CrOS/.test(ua) ? "ChromeOS" : /Linux/.test(ua) ? "Linux" : "this computer";
+  return `${browser.replace("Microsoft ", "")} on ${os}`.slice(0, 60);
+}
+const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+const engineNow = () => Math.max((state && state.clock && state.clock.floor) || 0, (state && state.usage && state.usage.spanEnd) || 0, 0) || Date.now();
+
+/** A tick's span, kept until the account has counted it; a span touching the last unsent one with the same buckets extends it. */
+function keepSpan(span) {
+  if (!acct || !span) return;
+  const last = outbox.spans[outbox.spans.length - 1];
+  const same = last && last.seq > outbox.sentUpTo && last.to === span.from && JSON.stringify(last.buckets) === JSON.stringify(span.buckets);
+  if (same) last.to = span.to;
+  else outbox.spans.push({ seq: ++outbox.seq, from: span.from, to: span.to, buckets: span.buckets });
+  if (outbox.spans.length > MAX_SPANS) outbox.spans = outbox.spans.slice(-MAX_SPANS);
+}
+
+/** A request the user made here: applied to the copy already, and sent at the next sync (soon). */
+function sendLater(req) {
+  if (!acct || !acct.token) return;
+  outbox.requests.push({ id: `r-${Date.now()}-${++reqN}`, ...req });
+  saveAccount();
+  syncSoon();
+}
+let soon = null;
+function syncSoon() { clearTimeout(soon); soon = setTimeout(() => sync(), 300); }
+
+let syncing = null;
+/**
+ * One sync: spans and requests up, the copy down. `now` is this request alone, for what needs Claude (sent at
+ * once, and not kept if the account can't be reached). Returns the results by request id, or null if unreachable.
+ */
+function sync(now = []) {
+  const run = (syncing || Promise.resolve()).then(() => syncOnce(now));
+  syncing = run.catch(() => null);
+  return run;
+}
+async function syncOnce(now) {
+  if (!acct || !acct.token) return null;
+  await load();
+  const spans = outbox.spans.slice(), requests = [...outbox.requests, ...now];
+  outbox.sentUpTo = outbox.seq;
+  const r = await callAccount("sync", { now: engineNow(), tz: tz(), have: acct.version || 0, spans, requests }, acct.token);
+  if (!r.ok) {
+    if (r.error === "bad_token") acct = { ...acct, token: null, error: "removed" }; // removed from the account: carry on alone
+    else if (r.error === "account_deleted") acct = { ...acct, token: null, error: "deleted" };
+    else acct = { ...acct, error: r.error || "unreachable" };
+    await saveAccount();
+    return null;
+  }
+  const d = r.data;
+  const answered = new Set(requests.map((q) => q.id));
+  outbox.requests = outbox.requests.filter((q) => !answered.has(q.id));
+  outbox.spans = outbox.spans.filter((x) => x.seq > (d.spansUpTo ?? 0));
+  acct = { ...acct, version: d.version ?? acct.version, lastSync: Date.now(), error: null, serverNow: d.serverNow };
+  if (d.copy) {
+    // The account's copy, with this device's own fields, and what it did since this sync began applied again.
+    await update((st) => ({ state: engine.guardClock(account.rebase(st, d.copy, { spans: outbox.spans, ops: outbox.requests.filter((q) => account.LOCAL_OPS.includes(q.type)) })) }));
+  }
+  await saveAccount();
+  const results = new Map();
+  (d.results || []).forEach((x, i) => results.set((x && x.id) || (requests[i] && requests[i].id), x));
+  return results;
+}
+
+/** A request that needs Claude: asked of the account at once. Null when it can't be reached. */
+async function askAccount(req) {
+  const q = { id: `r-${Date.now()}-${++reqN}`, ...req };
+  const results = await sync([q]);
+  return results ? results.get(q.id) || { error: "no_result" } : null;
+}
+
+/** The welcome is finished (or an install from before accounts starts up): make the account, with this state. */
+async function createAccount() {
+  if (acct && (acct.token || acct.error === "left")) return acct;
+  const s = await load();
+  const r = await callAccount("create", { device: { name: deviceName(), kind: "extension" }, tz: tz(), now: engineNow(), state: s });
+  if (!r.ok) { acct = { ...(acct || {}), error: r.error || "unreachable", pendingCreate: true }; await saveAccount(); return null; }
+  const d = r.data;
+  acct = { accountId: d.accountId, deviceId: d.device.id, token: d.device.token, version: d.version, lastSync: Date.now(), error: null, created: Date.now() };
+  outbox = { seq: 0, sentUpTo: 0, spans: [], requests: [] };
+  if (d.copy) await update((st) => ({ state: engine.guardClock(account.rebase(st, d.copy)) }));
+  await saveAccount();
+  return acct;
+}
+
+/** Join the account another device shows a code for. This device's own account, if any, is left first. */
+async function joinAccount(code) {
+  const s = await load();
+  if (acct && acct.token) await callAccount("leave", {}, acct.token);
+  const r = await callAccount("join", { code: String(code || "").replace(/\D/g, "").slice(0, 6), device: { name: deviceName(), kind: "extension" }, tz: tz(), now: engineNow(), state: s.setupDone ? s : undefined });
+  if (!r.ok) return { error: r.error || "unreachable" };
+  const d = r.data;
+  acct = { accountId: d.accountId, deviceId: d.device.id, token: d.device.token, version: d.version, lastSync: Date.now(), error: null, joined: Date.now() };
+  outbox = { seq: 0, sentUpTo: 0, spans: [], requests: [] };
+  await update((st) => ({ state: engine.guardClock(account.rebase(st, d.copy)) }));
+  await saveAccount();
+  return { ok: true, merged: d.merged || null };
+}
+
 // ---------- the calendar link ----------
 
 /** Read the pasted calendar link, at most once a day (or now, `force`). Nothing from it is sent anywhere. */
@@ -83,6 +207,9 @@ async function readCalendar(force = false) {
     if (!res.ok) throw new Error("http_" + res.status);
     const text = (await res.text()).slice(0, 2_000_000);
     await update((st) => ({ state: engine.recordCalendar(st, text, Date.now()) }));
+    // The account gets the next 48 hours' events (titles and times), never the link.
+    const soonEvents = (state.calendar.events || []).filter((e) => e.start <= Date.now() + 48 * 3600e3).slice(0, 20);
+    sendLater({ type: "calendar", events: soonEvents });
   } catch (e) {
     await update((st) => ({ state: engine.calendarFailed(st, (e && e.message) || "unreachable", Date.now()) }));
   }
@@ -140,7 +267,10 @@ async function macExchange(force) {
   if (requests.length) {
     await update((s) => {
       let n = s;
-      for (const r of requests) n = engine.applyMacRequest(n, r, Date.now()).state;
+      for (const r of requests) {
+        n = engine.applyMacRequest(n, r, Date.now()).state;
+        if (r && r.type === "exam.start") sendLater({ type: "startExam", until: r.until, goal: r.goal, source: "mac" });
+      }
       return { state: n };
     });
     macSync(true); // the result shows in the next snapshot
@@ -203,6 +333,7 @@ async function tick() {
   const present = chrome.idle ? (await chrome.idle.queryState(IDLE_SECONDS)) === "active" : true;
   const active = present || !!(tab && tab.audible);
   const out = await update((s) => engine.tick(s, { url: front || "", title: (tab && tab.title) || "", focused, active, seconds, now, audible }));
+  keepSpan(out.span);
   checkTime();
   // Each period of withheld site access goes into the history (QA round 2 #3, "Make it visible").
   if (JSON.stringify((state.withheld && state.withheld.domains) || []) !== JSON.stringify([...blind].sort())) {
@@ -239,6 +370,7 @@ async function sortSite(domain, title) {
   const r = await callRelay("/sort", { installId: s.installId, domain, title: title.slice(0, 300) });
   const kind = r.ok && typeof r.data.kind === "string" ? r.data.kind : null;
   await update((st) => ({ state: kind ? engine.recordSort(st, domain, kind) : engine.sortFailed(st, domain, Date.now()) }));
+  if (kind) sendLater({ type: "sorted", domain, kind });
 }
 
 /**
@@ -271,6 +403,7 @@ async function judgeVideo(key) {
       }
     }
     await update((s) => ({ state: engine.recordJudgment(s, key, rule, by, Date.now()) }));
+    sendLater({ type: "judged", key, rule, by });
     tick(); // a video that is now closed goes to the gate at once
   } finally {
     judgingNow.delete(key);
@@ -298,7 +431,9 @@ const handlers = {
     // `count`: the gate page's first look at a closed site, one more "time the gate held" for the week.
     await update((s) => {
       const r = engine.rollover(s, Date.now());
-      return { state: count && engine.decide(r, { url, now: Date.now() }).verdict !== "allow" ? engine.noteGate(r, Date.now()) : r };
+      const held = count && engine.decide(r, { url, now: Date.now() }).verdict !== "allow";
+      if (held) sendLater({ type: "noteGate" });
+      return { state: held ? engine.noteGate(r, Date.now()) : r };
     });
     // A video stopped before it loaded, not judged yet: judge it now; the gate asks again in a moment.
     const judging = engine.needsJudgment(state, url);
@@ -316,6 +451,13 @@ const handlers = {
   async talk({ url, message }) {
     const req = engine.gateRequest(await load(), { url, message, now: Date.now() });
     if (req.refused) return { decision: "refused", reason: req.refused, until: req.until };
+    if (acct && acct.token) {
+      // The account asks Claude itself, with its own state; only the page's scheme and host are sent.
+      let origin = url;
+      try { origin = new URL(url).origin + "/"; } catch {}
+      const r = await askAccount({ type: "talk", url: origin, message });
+      return r || { decision: "error", error: "unreachable" };
+    }
     const r = await callRelay("/gate", req.payload);
     if (!r.ok) return { decision: "error", error: r.error, scope: r.scope };
     const out = await update((s) => engine.applyGateAnswer(s, { url, answer: r.data, now: Date.now() }));
@@ -335,6 +477,7 @@ const handlers = {
       if (judge !== undefined) n = engine.setConsent(n, "judge", judge);
       return { state: n };
     });
+    if (help !== undefined) sendLater({ type: "consent", help, seeAll });
     return {
       talk: engine.consented(state, "talk"), sorting: engine.consented(state, "sorting") && state.sorting,
       chat: engine.consented(state, "chat"), judge: engine.consented(state, "judge"),
@@ -345,6 +488,13 @@ const handlers = {
   async chat({ message }) {
     const req = engine.chatRequest(await load(), { message, now: Date.now() });
     if (req.refused) return { refused: req.refused };
+    if (acct && acct.token) {
+      // The account adds the turn, asks Claude and keeps the card; the copy brings them back here.
+      const r = await askAccount({ type: "chat", message });
+      if (r) return r;
+      await update((s) => ({ state: engine.addTurn(engine.addTurn(s, "user", message, Date.now()), "gatekeeper", "Can't reach your Gatekeeper account right now. Your rules page still works.", Date.now()) }));
+      return { failed: "unreachable" };
+    }
     await update((s) => ({ state: engine.addTurn(s, "user", message, Date.now()) }));
     const r = await callRelay("/rules", req.payload);
     const preview = r.ok ? engine.chatPreview(await load(), r.data, Date.now()) : null;
@@ -359,15 +509,18 @@ const handlers = {
   // Apply the open card, checked again against the rules as they are now.
   async applyCard() {
     const out = await update((s) => engine.applyCard(s, Date.now()));
+    sendLater({ type: "applyCard" });
     macSync(true);
     return out.refused ? { refused: out.refused } : out.outcome;
   },
   async dropCard() {
     await update((s) => ({ state: engine.dropCard(s, Date.now()) }));
+    sendLater({ type: "dropCard" });
     return { ok: true };
   },
   async forgetThread() {
     await update((s) => ({ state: engine.forgetThread(s) }));
+    sendLater({ type: "forgetThread" });
     return { ok: true };
   },
   // The watch week: start it from the welcome tab, end it early with one tap, and mark its summary seen.
@@ -375,6 +528,7 @@ const handlers = {
   async startExam({ until, goal, source }) {
     const from = ["today", "rules", "calendar"].includes(source) ? source : "extension";
     const out = await update((s) => engine.startExam(s, { until, goal, source: from }, Date.now()));
+    if (!out.refused) sendLater({ type: "startExam", until, goal, source: from });
     macSync(true);
     return { ok: !out.refused, refused: out.refused, exam: out.exam };
   },
@@ -388,11 +542,13 @@ const handlers = {
   },
   async dismissOffer({ offer }) {
     await update((s) => ({ state: engine.dismissOffer(s, offer) }));
+    sendLater({ type: "dismissOffer", offer });
     return { ok: true };
   },
   // Ending exam mode early: a request to the agent, or a reason why nothing is asked (decision 3).
   async endExam() {
     const out = await update((s) => engine.endExam(s, Date.now()));
+    if (out.needsOk) sendLater({ type: "endExam" });
     macSync(true);
     return { refused: out.refused, until: out.until, needsOk: !!out.needsOk };
   },
@@ -400,6 +556,13 @@ const handlers = {
   async loosen({ message }) {
     const req = engine.loosenRequest(await load(), { message, now: Date.now() });
     if (req.refused) return { decision: "refused", reason: req.refused };
+    if (acct && acct.token) {
+      // The account holds the key: it asks the agent with its own state, and its answer comes back in the copy.
+      const r = await askAccount({ type: "loosen", message });
+      if (r) return r;
+      await update((s) => engine.loosenUnavailable(s, { message, error: "unreachable", now: Date.now() }));
+      return { decision: "unavailable", error: "unreachable" };
+    }
     const r = await callRelay("/loosen", req.payload);
     if (!r.ok) {
       await update((s) => engine.loosenUnavailable(s, { message, error: r.error, now: Date.now() }));
@@ -415,7 +578,60 @@ const handlers = {
   // "Drop this change" next to a loosening's reason box: the change is cancelled, nothing loosens.
   async dropLoosen() {
     await update((s) => ({ state: engine.dropLoosen(s, Date.now()) }));
+    sendLater({ type: "dropLoosen" });
     return { ok: true };
+  },
+  // ---------- the account: Settings › Your Gatekeeper, and the welcome's "Already use Gatekeeper?" ----------
+  async accountStatus() {
+    await load();
+    const view = acct ? { accountId: acct.accountId, deviceId: acct.deviceId, in: !!acct.token, lastSync: acct.lastSync || 0, problem: acct.error || null, created: acct.created || 0 } : null;
+    let devices = null;
+    if (acct && acct.token) {
+      const r = await callAccount("devices", {}, acct.token);
+      if (r.ok) devices = r.data.devices;
+    }
+    return { account: view, devices, name: deviceName(), pending: outbox.requests.length, unsent: outbox.spans.length };
+  },
+  async addDevice() {
+    if (!(acct && acct.token)) return { error: "no_account" };
+    const r = await callAccount("code", {}, acct.token);
+    return r.ok ? { code: r.data.code, expiresAt: r.data.expiresAt } : { error: r.error };
+  },
+  async joinAccount({ code }) {
+    return joinAccount(code);
+  },
+  async removeDevice({ deviceId }) {
+    if (!(acct && acct.token)) return { error: "no_account" };
+    const r = await callAccount("remove", { deviceId }, acct.token);
+    return r.ok ? { ok: true } : { error: r.error };
+  },
+  // Leaving loosens nothing: the copy stays, and this browser carries on alone.
+  async leaveAccount() {
+    if (!(acct && acct.token)) return { error: "no_account" };
+    const r = await callAccount("leave", {}, acct.token);
+    if (!r.ok && r.status !== 401 && r.status !== 410) return { error: r.error };
+    if (r.ok && r.data.copy) await update((st) => ({ state: engine.guardClock(account.leaveCopy(r.data.copy, st)) }));
+    acct = { ...acct, token: null, error: "left" };
+    outbox = { seq: 0, sentUpTo: 0, spans: [], requests: [] };
+    await saveAccount();
+    return { ok: true };
+  },
+  async deleteAccount() {
+    if (!(acct && acct.token)) return { error: "no_account" };
+    const r = await callAccount("delete", {}, acct.token);
+    if (!r.ok) return { error: r.error };
+    acct = { ...acct, token: null, error: "deleted" };
+    await saveAccount();
+    return { ok: true };
+  },
+  async exportAccount() {
+    if (!(acct && acct.token)) return { error: "no_account" };
+    const r = await callAccount("export", {}, acct.token);
+    return r.ok ? { data: r.data } : { error: r.error };
+  },
+  async syncNow() {
+    const r = await sync();
+    return { ok: !!r };
   },
   async mac() {
     await macSync(true);
@@ -425,18 +641,24 @@ const handlers = {
   },
   async watch({ goal }) {
     await update((s) => ({ state: engine.startWatch(s, { goal }, Date.now()) }));
+    // Finishing the welcome makes the account (said plainly on the welcome page).
+    if (!(acct && acct.token)) await createAccount(); else sendLater({ type: "watch", goal });
     return { ok: true };
   },
   async endWatch() {
     await update((s) => ({ state: engine.endWatch(s, Date.now()) }));
+    sendLater({ type: "endWatch" });
     return { ok: true };
   },
   async watchShown() {
     await update((s) => ({ state: engine.markWatchShown(s) }));
+    sendLater({ type: "watchShown" });
     return { ok: true };
   },
   async setup({ kinds, goal }) {
     const out = await update((s) => engine.completeSetup(s, { kinds, goal }, Date.now()));
+    // Finishing the welcome makes the account (said plainly on the welcome page); a device that joined sends it.
+    if (!(acct && acct.token)) await createAccount(); else sendLater({ type: "setup", kinds, goal });
     return { now: out.now, later: out.later, from: out.from };
   },
   async propose({ rules, goal }) {
@@ -444,6 +666,7 @@ const handlers = {
       const r = engine.proposeRules(s, rules, Date.now(), { undoable: true });
       return { ...r, state: goal === undefined ? r.state : engine.setGoal(r.state, goal) };
     });
+    sendLater({ type: "propose", rules, goal, undoable: true });
     return { now: out.now, later: out.later, from: out.from, needsOk: !!out.needsOk, refused: out.refused };
   },
 };
@@ -475,6 +698,15 @@ chrome.windows.onFocusChanged.addListener(tick);
 chrome.alarms.create("tick", { periodInMinutes: 0.5 });
 chrome.alarms.create("mac", { periodInMinutes: 1 }); // the Mac app's heartbeat, and its requests
 chrome.alarms.create("calendar", { periodInMinutes: 60 }); // the calendar link, read once a day
-chrome.alarms.onAlarm.addListener((a) => (a.name === "mac" ? macSync(true) : a.name === "calendar" ? readCalendar() : tick()));
+chrome.alarms.create("sync", { periodInMinutes: 0.5 }); // the account, about every 30 seconds
+chrome.alarms.onAlarm.addListener((a) => (a.name === "mac" ? macSync(true) : a.name === "calendar" ? readCalendar() : a.name === "sync" ? accountTick() : tick()));
+setInterval(accountTick, SYNC_MS);
+
+/** Every 30 seconds: sync, or make the account a set-up install from before accounts doesn't have yet. */
+async function accountTick() {
+  await load();
+  if (acct && acct.token) return sync();
+  if (state.setupDone && (!acct || acct.pendingCreate)) return createAccount();
+}
 setInterval(tick, TICK_MS);
 update((s) => ({ state: engine.rollover(s, Date.now()) }));

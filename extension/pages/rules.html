@@ -98,6 +98,36 @@
       </div>
     </div>
   </div>
+
+  <div class="section" id="account">
+    <h2>Your Gatekeeper</h2>
+    <div class="card">
+      <div class="rowblock" id="account-row">
+        <div class="name" id="account-title">Your Gatekeeper account</div>
+        <div class="sub" id="account-sub"></div>
+        <div class="stack" id="devices" style="gap: 6px"></div>
+        <div class="row" style="padding: 0; justify-content: flex-start; gap: 12px; flex-wrap: wrap">
+          <button class="btn" type="button" id="add-device">Add a device</button>
+          <span class="code hidden" id="device-code" style="font-size: 24px; letter-spacing: 4px; font-weight: 700"></span>
+          <span class="small muted hidden" id="device-code-note"></span>
+        </div>
+      </div>
+      <div class="rowblock" id="account-join">
+        <div class="sub">Already use Gatekeeper elsewhere? Join it with the code from that device. This browser's rules are kept for 30 days.</div>
+        <form class="inline" id="account-join-form">
+          <label for="account-join-code" class="sr">The 6-digit code</label>
+          <input class="field" id="account-join-code" inputmode="numeric" maxlength="7" placeholder="6-digit code" autocomplete="one-time-code" style="flex: 0 0 160px">
+          <button class="btn ghost" type="submit">Join</button>
+        </form>
+        <div class="small muted" id="account-join-note"></div>
+      </div>
+      <div class="row" style="justify-content: flex-start; gap: 16px; flex-wrap: wrap">
+        <button class="link" type="button" id="account-export">Get a copy of my data</button>
+        <button class="link" type="button" id="account-leave">Leave this account</button>
+        <button class="link" type="button" id="account-delete">Delete my Gatekeeper account</button>
+      </div>
+    </div>
+  </div>
 </main>
 <script type="module" src="rules.js"></script>
 </body>

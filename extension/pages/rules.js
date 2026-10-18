@@ -409,5 +409,72 @@ async function load() {
   renderCalendar();
 }
 
+// ---------- your Gatekeeper account (one Gatekeeper per person, 0.3.0) ----------
+
+const ago = (t) => { const m = Math.round((Date.now() - t) / 60e3); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : when(t); };
+async function renderAccount() {
+  const a = await ask("accountStatus").catch(() => null);
+  if (!a) return;
+  const acc = a.account;
+  const inIt = !!(acc && acc.in);
+  $("account-title").textContent = inIt ? "Your Gatekeeper account" : "This browser's Gatekeeper";
+  $("account-sub").textContent = !acc ? "Your account is made when you finish the welcome."
+    : inIt ? `This browser (${a.name}) follows your account. ${acc.lastSync ? `Last in touch ${ago(acc.lastSync)}.` : ""}${acc.problem ? " Can't reach Gatekeeper's server right now; this browser keeps working from its copy." : ""}`
+    : acc.problem === "removed" ? "This browser was removed from your account. It carries on alone with its copy; join again with a code."
+    : acc.problem === "deleted" ? "Your account was deleted. This browser carries on alone with its copy."
+    : acc.problem === "left" ? "This browser left your account and carries on alone with its copy."
+    : "Gatekeeper's server can't be reached yet; your account is made as soon as it can be.";
+  const devices = a.devices || [];
+  $("devices").replaceChildren(...devices.map((d) => {
+    const row = el("div", { class: "row small", style: "padding: 0", "data-device": d.id },
+      el("span", {}, `${d.name}${d.self ? " (this browser)" : ""}`), el("span", { class: "muted" }, d.seenAt ? `seen ${ago(d.seenAt)}` : ""));
+    if (!d.self) {
+      const rm = el("button", { class: "link", type: "button", "data-remove-device": d.id }, "Remove");
+      rm.addEventListener("click", async () => { await ask("removeDevice", { deviceId: d.id }); renderAccount(); });
+      row.append(rm);
+    }
+    return row;
+  }));
+  for (const id of ["add-device", "account-export", "account-leave", "account-delete"]) $(id).classList.toggle("hidden", !inIt);
+}
+$("add-device").addEventListener("click", async () => {
+  const r = await ask("addDevice");
+  if (r.error) { $("device-code-note").textContent = "Couldn't get a code: Gatekeeper's server can't be reached."; $("device-code-note").classList.remove("hidden"); return; }
+  $("device-code").textContent = r.code;
+  $("device-code-note").textContent = `On your other device: Gatekeeper's welcome, or Your Gatekeeper › Join. Works once, until ${clock(r.expiresAt)}.`;
+  $("device-code").classList.remove("hidden"); $("device-code-note").classList.remove("hidden");
+});
+$("account-join-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const code = $("account-join-code").value.replace(/\D/g, "");
+  if (code.length !== 6) { $("account-join-note").textContent = "The code has 6 digits."; return; }
+  const r = await ask("joinAccount", { code }).catch(() => ({ error: "unreachable" }));
+  if (r.error) { $("account-join-note").textContent = r.error === "bad_code" ? "That code is wrong, used or older than 10 minutes." : "That didn't work. Try again in a moment."; return; }
+  $("account-join-note").textContent = r.merged && r.merged.rulesDiffer
+    ? "Joined. Your Gatekeeper's rules apply here; this browser's are kept for 30 days."
+    : "Joined. This browser follows your Gatekeeper now.";
+  if (r.merged && r.merged.rulesDiffer) {
+    const use = el("button", { class: "link", type: "button", id: "use-device-rules" }, "Use this browser's rules instead");
+    use.addEventListener("click", () => propose(r.merged.lostRules));
+    $("account-join-note").append(" ", use);
+  }
+  await load(); renderAccount();
+});
+$("account-leave").addEventListener("click", async () => {
+  if (!confirm("Leave your Gatekeeper account? This browser keeps today's rules and minutes and carries on alone.")) return;
+  await ask("leaveAccount"); renderAccount();
+});
+$("account-delete").addEventListener("click", async () => {
+  if (!confirm("Delete your Gatekeeper account? Everything it holds is deleted on Gatekeeper's server at once. Each device keeps its own copy and carries on alone.")) return;
+  await ask("deleteAccount"); renderAccount();
+});
+$("account-export").addEventListener("click", async () => {
+  const r = await ask("exportAccount");
+  if (r.error) return;
+  const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(r.data, null, 2)], { type: "application/json" })), download: "gatekeeper-account.json" });
+  a.click();
+});
+
 checkWorker();
 load();
+renderAccount();

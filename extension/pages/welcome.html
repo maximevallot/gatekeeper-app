@@ -9,6 +9,17 @@
 </head>
 <body>
 <main class="page narrow">
+  <div class="card rowblock" id="join-card" style="margin-bottom: 24px">
+    <div class="name">Already use Gatekeeper?</div>
+    <div class="sub">Enter the code from your other device: on it, open your rules, then Your Gatekeeper › Add a device.</div>
+    <form class="inline" id="join-form">
+      <label for="join-code" class="sr">The 6-digit code</label>
+      <input class="field" id="join-code" inputmode="numeric" maxlength="7" placeholder="6-digit code" autocomplete="one-time-code" style="flex: 0 0 160px">
+      <button class="btn" type="submit" id="join-go">Join</button>
+    </form>
+    <div class="small muted hidden" id="join-error"></div>
+  </div>
+
   <div id="watch" style="display: flex; flex-direction: column; gap: 32px">
     <div class="section" style="gap: 8px">
       <div class="eyebrow">Gatekeeper</div>
@@ -19,6 +30,7 @@
       <label for="watch-goal" style="font-size: 18px; font-weight: 600">What are you working toward?</label>
       <input class="field" id="watch-goal" maxlength="300" placeholder="Finish problem set 4 by Thursday" autocomplete="off">
     </div>
+    <p class="small muted account-line"></p>
     <div class="row" style="padding: 0">
       <button class="link" type="button" id="skip-watch">Skip: set limits now</button>
       <button class="btn" type="button" id="start-watch">Start watching</button>
@@ -59,6 +71,7 @@
       </div>
     </div>
 
+    <p class="small muted account-line"></p>
     <div class="row" style="padding: 0">
       <span class="small muted">Next: private windows (one switch).</span>
       <button class="btn" id="start" disabled>Start</button>
@@ -75,6 +88,14 @@
       <div class="name">Private windows</div>
       <p class="muted" id="private-text"></p>
       <div><button class="link" id="private-check" type="button">Check again</button></div>
+    </div>
+    <div class="card rowblock hidden" id="join-choice">
+      <div class="name">Found your Gatekeeper: use its rules here?</div>
+      <div class="sub" id="join-choice-text"></div>
+      <div class="row" style="padding: 0; justify-content: flex-start; gap: 12px">
+        <button class="btn" type="button" id="use-account">Use its rules</button>
+        <button class="btn ghost" type="button" id="use-device">Use this device's rules instead</button>
+      </div>
     </div>
     <div class="okbox" id="done-privacy"></div>
     <div class="note hidden" id="done-error"></div>

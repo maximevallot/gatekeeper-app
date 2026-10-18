@@ -11,12 +11,20 @@
 
 import * as engine from "./engine.js";
 
-/** Fields that belong to one device, never to the account: its clock, its calendar link, its install number. */
-export const DEVICE_FIELDS = ["clock", "calendar", "installId", "unknown", "judging", "withheld", "account", "outbox", "offersDismissed"];
+// The account contract, version 1 (~/gatekeeper-relay docs/account-contract.md on its account branch).
+export const CONTRACT = 1;
 
-/** Operations a device may apply to its own copy at once, and the account applies on sync. Claude's are online only. */
-export const LOCAL_OPS = ["propose", "startExam", "endExam", "setup", "watch", "endWatch", "watchShown", "dismissOffer", "applyCard", "dropCard", "forgetThread", "dropLoosen", "consent", "goal"];
-export const ONLINE_OPS = ["chat", "loosen", "gate", "sort", "judge"];
+/**
+ * Fields that belong to one device, never to the account (contract, "The copy"): its clock, its calendar link,
+ * work in flight, whether this browser may see every site, which of its sites it can't see, and offers it
+ * dismissed. The install number is the account's ID once joined, so the account's daily allowance counts.
+ */
+export const DEVICE_FIELDS = ["clock", "calendar", "unknown", "judging", "sorting", "withheld", "offersDismissed"];
+
+/** Requests a device applies to its own copy at once, and the account applies on sync. Claude's are online only. */
+export const LOCAL_OPS = ["setup", "propose", "goal", "consent", "applyCard", "dropCard", "forgetThread", "startExam", "endExam",
+  "dropLoosen", "watch", "endWatch", "watchShown", "dismissOffer", "noteGate", "sorted", "judged"];
+export const ONLINE_OPS = ["talk", "chat", "loosen"];
 
 const without = (s, keys) => Object.fromEntries(Object.entries(s).filter(([k]) => !keys.includes(k)));
 
@@ -45,7 +53,7 @@ export function rebase(local, copy, { spans = [], ops = [], now } = {}) {
  */
 export function applyOp(state, op, now) {
   const o = op && typeof op === "object" ? op : {};
-  switch (o.op) {
+  switch (o.type || o.op) {
     case "propose": {
       const r = engine.proposeRules(state, o.rules || {}, now, { source: o.source || "extension", undoable: !!o.undoable });
       return { ...r, state: o.goal === undefined ? r.state : engine.setGoal(r.state, o.goal) };
@@ -62,8 +70,11 @@ export function applyOp(state, op, now) {
     case "dropCard": return { state: engine.dropCard(state, now) };
     case "forgetThread": return { state: engine.forgetThread(state) };
     case "dropLoosen": return { state: engine.dropLoosen(state, now) };
-    case "consent": return { state: engine.setHelp(state, !!o.help, { sorting: !!o.sorting }) };
-    default: return { state, refused: ONLINE_OPS.includes(o.op) ? "online_only" : "unknown_op" };
+    case "consent": return { state: o.help === undefined ? state : engine.setHelp(state, !!o.help, { sorting: !!(o.seeAll ?? o.sorting) }) };
+    case "noteGate": return { state: engine.noteGate(state, now) };
+    case "sorted": return { state: engine.recordSort(state, String(o.domain || ""), String(o.kind || "")) };
+    case "judged": return { state: engine.recordJudgment(state, o.key, o.rule ?? null, o.by || "words", now) };
+    default: return { state, refused: ONLINE_OPS.includes(o.type || o.op) ? "online_only" : "unknown_op" };
   }
 }
 
@@ -121,8 +132,8 @@ export function join(account, local, choice = "account", now) {
 
 /** Leaving: the device keeps a full copy (rules, today's minutes, exam mode) and carries on alone. Nothing loosens. */
 export function leaveCopy(account, local = {}) {
-  const mine = Object.fromEntries(DEVICE_FIELDS.filter((k) => k in local && k !== "account" && k !== "outbox").map((k) => [k, local[k]]));
-  return engine.upgrade({ ...copyFor(account), ...mine, account: null, outbox: null });
+  const mine = Object.fromEntries(DEVICE_FIELDS.filter((k) => k in local).map((k) => [k, local[k]]));
+  return engine.upgrade({ ...copyFor(account), ...mine });
 }
 
 /** Whether two rule sets differ, so joining needs the "use its rules here?" question. */

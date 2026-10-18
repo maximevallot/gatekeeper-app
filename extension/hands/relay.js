@@ -45,3 +45,28 @@ export async function relayTime() {
     clearTimeout(timer);
   }
 }
+
+/**
+ * One call to the Gatekeeper account (contract version 1, ~/gatekeeper-relay docs/account-contract.md): POST
+ * /account/<path> with the device's token. Returns { ok, status, data } or { ok: false, error }.
+ */
+export async function callAccount(path, body, token) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(RELAY_URL + "/account/" + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
+      body: JSON.stringify({ v: 1, ...body }),
+      signal: ctrl.signal,
+      credentials: "omit",
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) return { ok: false, status: res.status, error: (data && data.error) || "bad_response", data };
+    return { ok: true, status: res.status, data };
+  } catch {
+    return { ok: false, error: "unreachable" };
+  } finally {
+    clearTimeout(timer);
+  }
+}

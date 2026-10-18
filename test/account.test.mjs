@@ -102,13 +102,13 @@ test("leaving keeps a full copy and loosens nothing; the copy a device gets has 
   let account = createAccount(device({ video: 20 }, "a"), SAT);
   account = startExam(account, { until: SAT + 3600e3 }, SAT).state;
   account = applySpans(account, [{ from: SAT, to: SAT + 5000, buckets: ["video"] }], { now: SAT + 5000 });
-  const copy = copyFor({ ...account, calendar: { url: "https://x" }, installId: "a" });
+  const copy = copyFor({ ...account, calendar: { url: "https://x" }, sorting: true });
   for (const k of DEVICE_FIELDS) assert.ok(!(k in copy), k);
-  const left = leaveCopy(account, { installId: "mine", clock: { floor: SAT + 6000, guard: true }, account: { id: "acc" } });
+  assert.equal(copy.installId, account.installId, "the account's ID is the install number, for the daily allowance");
+  const left = leaveCopy(account, { clock: { floor: SAT + 6000, guard: true }, calendar: { url: "https://x.edu/c.ics", events: [] } });
   assert.ok(examOn(left));
   assert.equal(left.usage.seconds.video, 5);
-  assert.equal(left.installId, "mine");
-  assert.equal(left.account, null);
+  assert.equal(left.calendar.url, "https://x.edu/c.ics", "the calendar link stays where it was pasted");
 });
 
 test("rebase: a fresh copy, with what this device did since its last sync applied again on top", () => {
@@ -117,14 +117,15 @@ test("rebase: a fresh copy, with what this device did since its last sync applie
   const local = { ...device({ video: 20, social: 20 }, "b"), clock: { floor: SAT + 15e3, guard: true } };
   const s = rebase(local, copyFor(account), {
     spans: [{ from: SAT + 5000, to: SAT + 10e3, buckets: ["video"] }, { from: SAT + 10e3, to: SAT + 15e3, buckets: ["social"] }],
-    ops: [{ op: "propose", rules: { ...account.rules, kinds: { video: { minutes: 10 }, social: { minutes: 20 } } } }],
+    ops: [{ type: "propose", rules: { ...account.rules, kinds: { video: { minutes: 10 }, social: { minutes: 20 } } } }],
     now: SAT + 15e3,
   });
   assert.equal(s.usage.seconds.video, 10);
   assert.equal(s.usage.seconds.social, 5);
   assert.equal(s.rules.kinds.video.minutes, 10, "the tightening done offline is kept");
-  assert.equal(s.installId, "b");
+  assert.equal(s.installId, "a", "the account's ID");
   assert.equal(s.clock.guard, true);
-  assert.equal(applyOp(s, { op: "chat", message: "hi" }, SAT).refused, "online_only");
-  assert.equal(applyOp(s, { op: "nonsense" }, SAT).refused, "unknown_op");
+  assert.equal(applyOp(s, { type: "chat", message: "hi" }, SAT).refused, "online_only");
+  assert.equal(applyOp(s, { type: "nonsense" }, SAT).refused, "unknown_op");
+  assert.equal(applyOp(s, { type: "sorted", domain: "lequipe.fr", kind: "news" }, SAT).state.sorted["lequipe.fr"], "news");
 });
