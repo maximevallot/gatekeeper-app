@@ -1,7 +1,7 @@
 // Change something: the one thread with Gatekeeper. The engine keeps it (state.thread), so the popup, this tab
 // and the tab the Mac opens all show the same talk and update together. A change comes as a card; nothing
 // changes until Apply, and Apply checks the card again against the rules as they are then.
-import { ask, el, clock, lockIcon, clockIcon, whatsSent, checkWorker } from "./common.js";
+import { ask, el, clock, lockIcon, clockIcon, whatsSent, checkWorker, askEverySite } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 const inTab = new URLSearchParams(location.search).get("from") === "rules" || window.innerWidth > 520;
@@ -45,6 +45,8 @@ function cardView(c) {
   const apply = el("button", { class: "btn", type: "button", id: "apply" }, "Apply");
   const not = el("button", { class: "btn ghost", type: "button", id: "not-this" }, "Not this");
   apply.addEventListener("click", async () => {
+    // Exam mode from the chat asks for access to every site too, inside this click (QA round 3, N3).
+    if ((c.answer.diff || []).some((op) => op && op.op === "examStart")) await askEverySite();
     // A site outside the catalog needs the browser's yes first, asked inside the click.
     // Only what the browser has not granted yet is asked for.
     const origins = v.needsAccess.map((d) => `*://*.${d}/*`);

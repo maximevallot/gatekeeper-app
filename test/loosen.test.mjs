@@ -127,7 +127,7 @@ test("an approved change stays approved: a second loosening asks only about itse
   assert.equal(rollover(r2.state, TUE).rules.kinds.video.minutes, 45);
 });
 
-test("ending exam mode early: the agent decides; a yes ends it at once only once the exam on the calendar has begun", () => {
+test("ending exam mode early: the agent decides; a yes ends it at once only once the exam's own time, fixed at the start, has come", () => {
   const WED = at("2026-10-22T08:30:00-04:00");
   const s0 = startExam(setUp(), { until: WED, goal: "midterm" }, MON).state;
   // QA round 2, C3: "it's over" two days before the exam. With no exam begun on the calendar, a "now" is the morning.
@@ -135,10 +135,13 @@ test("ending exam mode early: the agent decides; a yes ends it at once only once
   assert.ok(examOn(early.state), "no exam has begun: not at once");
   assert.equal(early.result.now, false);
   assert.equal(loosenRequest(endExam(s0, MON).state, { message: "exam is over", now: MON }).payload.exam.examAt, null);
-  // The calendar has the midterm at 20:00 tonight, inside exam mode, and it has begun.
+  // QA round 3, N1: a "Quiz" on the calendar during exam mode is not the exam; nothing on the calendar moves it.
+  const quiz = { ...s0, calendar: { url: "https://x.edu/cal.ics", events: [{ title: "Quiz 3, 15.401", start: MON - 60e3 }], fetchedAt: MON, error: null } };
+  assert.equal(loosenRequest(endExam(quiz, MON).state, { message: "exam is over", now: MON }).payload.exam.examAt, null);
+  assert.ok(examOn(applyLoosenAnswer(endExam(quiz, MON).state, { answer: { ...yes, when: "now" }, now: MON }).state), "the quiz doesn't end it");
+  // Exam mode started for the midterm at 20:00 tonight (its own time, fixed at the start), and it has begun.
   const EXAM = MON - 2 * 3600e3;
-  const s = { ...s0, calendar: { url: "https://x.edu/cal.ics", events: [{ title: "Midterm 15.425", start: EXAM }], fetchedAt: MON, error: null },
-    rules: { ...s0.rules, exam: { ...s0.rules.exam, from: EXAM - 3600e3 } } };
+  const s = startExam(setUp(), { until: WED, goal: "midterm", at: EXAM }, EXAM - 3600e3).state;
   assert.equal(loosenRequest(endExam(s, MON).state, { message: "done", now: MON }).payload.exam.examAt, "2026-10-19T20:00:00-04:00");
   const e = endExam(s, MON);
   assert.equal(e.needsOk, true);

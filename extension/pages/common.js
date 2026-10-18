@@ -66,10 +66,17 @@ export function warnings({ incognito, blind = [] }, into) {
   }
   if (blind.length) {
     out.push(el("div", { class: "note", id: "blind-warning" },
-      el("span", {}, `Gatekeeper can't see ${blind.slice(0, 2).join(", ")}${blind.length > 2 ? ` and ${blind.length - 2} more` : ""}, so they may open without being counted. In ${extensionsPage()}, set Gatekeeper's Site access to "On all sites".`)));
+      el("span", {}, `Gatekeeper can't see ${blind.slice(0, 2).join(", ")}${blind.length > 2 ? ` and ${blind.length - 2} more` : ""}, so they may open without being counted. On Gatekeeper's page in ${extensionsPage()}, ${siteAccessHelp().words}. `),
+      openAccessButton()));
   }
   for (const w of out) into.before(w);
   return out.length;
+}
+
+export function openAccessButton() {
+  const b = el("button", { class: "link", type: "button", id: "open-access" }, "Open Gatekeeper's settings");
+  b.addEventListener("click", () => siteAccessHelp().open());
+  return b;
 }
 
 /** The name of the switch that lets an extension run in private windows. */
@@ -187,8 +194,30 @@ export function examForm(done, source = "extension") {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const t = new Date(until.value).getTime();
+    await askEverySite();
     const r = await ask("startExam", { until: t, goal: goal.value, source }).catch(() => ({ refused: "unreachable" }));
     done(r);
   });
   return form;
+}
+
+/**
+ * Exam mode closes everything but study, and sites Gatekeeper doesn't know can be closed only with access to every
+ * site (QA round 3, gate N3). It is asked for in the click that starts exam mode: the smallest change, and the one
+ * that closes them before they load. Closing every tab whose address can't be read instead would also close the
+ * course pages and documents a student needs. Starting goes ahead either way; Today says what stays open.
+ */
+export async function askEverySite() {
+  const all = { origins: ["*://*/*"] };
+  if (await chrome.permissions.contains(all).catch(() => false)) return true;
+  return chrome.permissions.request(all).catch(() => false);
+}
+
+/** Where a browser's own page for Gatekeeper's site access is, and its words for the switch (QA round 3, first-run N2). */
+export function siteAccessHelp() {
+  const brave = extensionsPage().startsWith("brave");
+  return {
+    words: brave ? "turn on \"Automatically allow access on the following sites\", or the switch next to each site" : "set Site access to \"On all sites\"",
+    open: () => chrome.tabs.create({ url: (brave ? "brave" : "chrome") + "://extensions/?id=" + chrome.runtime.id }),
+  };
 }

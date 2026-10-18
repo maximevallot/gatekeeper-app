@@ -122,6 +122,9 @@ try {
   check("Today shows it", /Exam mode until/.test(await p.evaluate(`document.getElementById('mode').textContent`)));
   await p.send("Page.navigate", { url: base + "/pages/rules.html" }); await sleep(1000);
   check("the rules page shows it, with End early", !(await p.evaluate(`document.getElementById('exam-row').classList.contains('hidden')`)) && (await p.evaluate(`document.getElementById('exam-start-row').classList.contains('hidden')`)));
+  // QA round 3 #5: without access to every site (this build doesn't hold it), Today says sites it doesn't know stay open.
+  await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(1000);
+  check("QA round 3 #5: exam mode without every site says unknown sites stay open, with a way to close them", /stay open in this exam mode/.test(await p.evaluate(`(document.getElementById('exam-open-today') || {}).textContent || ''`)));
 } catch (e) {
   console.log("FAIL", e.message); failures++;
 }

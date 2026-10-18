@@ -18,10 +18,14 @@ let queue = Promise.resolve();
 let blocking = null; // the enforcement last written into the browser's rules
 let closedBefore = ""; // the closed domains at the last sweep of open tabs
 let blind = []; // watched domains the browser does not let Gatekeeper see
+let seeAllNow = false; // whether Gatekeeper may see every site (exam mode needs it for sites it doesn't know)
 let watchTabOpened = false; // the end-of-watch-week tab, opened once per worker
 let macSent = null; // the last snapshot sent to Gatekeeper for Mac, as snapshotKey
 let macStatus = { connected: false, error: null }; // how the last exchange went
 let lastTick = Date.now();
+// Monotonic time and this worker's run, for the engine's clock check (QA round 3): the wall clock is compared with
+// performance.now() between ticks, and a new run means the worker wasn't running in between.
+const RUN = crypto.randomUUID();
 
 async function load() {
   if (!state) {
@@ -69,7 +73,7 @@ async function checkTime() {
   if (!state || !engine.timeCheckNeeded(state) || Date.now() - lastTimeCheck < 30e3) return;
   lastTimeCheck = Date.now();
   const t = await relayTime();
-  if (t) await update((s) => ({ state: engine.confirmTime(s, t) }));
+  if (t) await update((s) => ({ state: engine.confirmTime(s, { ...t, mono: performance.now(), run: RUN }) }));
 }
 
 // ---------- the calendar link ----------
@@ -148,7 +152,8 @@ async function macExchange(force) {
 }
 
 async function syncBlocking() {
-  const e = engine.enforcement(state, Date.now(), { withheld: await withheldDomains(), seeAll: await chrome.permissions.contains(ALL_SITES) });
+  seeAllNow = await chrome.permissions.contains(ALL_SITES);
+  const e = engine.enforcement(state, Date.now(), { withheld: await withheldDomains(), seeAll: seeAllNow });
   blind = e.blind;
   const key = JSON.stringify([e.redirect, e.block, e.allowVideos, e.closeVideos, e.allowSites, e.examAll]);
   if (key !== blocking) {
@@ -202,11 +207,13 @@ async function tick() {
   // Safari has no chrome.idle: there, a focused window counts as the user being there (tick also needs focus).
   const present = chrome.idle ? (await chrome.idle.queryState(IDLE_SECONDS)) === "active" : true;
   const active = present || !!(tab && tab.audible);
-  const out = await update((s) => engine.tick(s, { url: front || "", title: (tab && tab.title) || "", focused, active, seconds, now, audible }));
+  const out = await update((s) => engine.tick(s, { url: front || "", title: (tab && tab.title) || "", focused, active, seconds, now, audible, mono: performance.now(), run: RUN }));
   checkTime();
-  // Each period of withheld site access goes into the history (QA round 2 #3, "Make it visible").
-  if (JSON.stringify((state.withheld && state.withheld.domains) || []) !== JSON.stringify([...blind].sort())) {
-    await update((st) => ({ state: engine.noteWithheld(st, blind, Date.now()) }));
+  // Each period of withheld site access goes into the history (QA round 2 #3, "Make it visible"), and so does exam
+  // mode without access to every site, which leaves the sites Gatekeeper doesn't know open (QA round 3, N3).
+  const unseen = [...blind, ...(engine.examOn(state) && !seeAllNow ? ["every site"] : [])].sort();
+  if (JSON.stringify((state.withheld && state.withheld.domains) || []) !== JSON.stringify(unseen)) {
+    await update((st) => ({ state: engine.noteWithheld(st, unseen, Date.now()) }));
   }
   if (!front) {
     badge(blind.length ? "!" : "");
@@ -310,7 +317,8 @@ const handlers = {
     if (sorting && !sortingNow.has(domain)) { sortingNow.add(domain); sortSite(domain, "").finally(() => sortingNow.delete(domain)); }
     const cooldownUntil = (state.cooldowns || {})[decision.ladder || decision.kind] || 0;
     const incognito = await chrome.extension.isAllowedIncognitoAccess();
-    return { decision, goal: state.goal, talk: engine.consented(state, "talk"), cooldownUntil: cooldownUntil > state.clock.floor ? cooldownUntil : 0, incognito, blind, judging, sorting };
+    return { decision, goal: state.goal, talk: engine.consented(state, "talk"), cooldownUntil: cooldownUntil > state.clock.floor ? cooldownUntil : 0, incognito, blind, judging, sorting,
+      checkingTime: engine.timeCheckNeeded(state) };
   },
   // One message at the gate. The relay is asked only if the engine says there is something to ask.
   async talk({ url, message }) {
