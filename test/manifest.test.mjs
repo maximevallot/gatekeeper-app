@@ -27,3 +27,8 @@ test("no permission beyond the four it needs, and nothing that reads pages; plai
   // list ends such a click on Chrome's error page), and under a per-session address pages cannot probe for.
   assert.deepEqual(m.web_accessible_resources, [{ resources: ["pages/gate.html"], matches: ["<all_urls>"], use_dynamic_url: true }]);
 });
+
+test("the 0.3 test build talks to the Mac's 0.3 test app, never 0.2's native host", () => {
+  const bg = readFileSync(new URL("../extension/hands/background.js", import.meta.url), "utf8");
+  assert.match(bg, /const MAC_HOST = "com\.gatekeeper\.helper\.test";/);
+});

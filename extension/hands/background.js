@@ -225,7 +225,8 @@ async function readCalendar(force = false) {
 
 // ---------- Gatekeeper for Mac (native messaging, contract version 1) ----------
 
-const MAC_HOST = "com.gatekeeper.helper";
+// The 0.3 test build talks to the Mac's 0.3 test app, registered beside 0.2's com.gatekeeper.helper (Safari ignores the name).
+const MAC_HOST = "com.gatekeeper.helper.test";
 const NATIVE = { permissions: ["nativeMessaging"] };
 
 /** Send today to the Mac app when what it shows changed, or always with `force` (the minute's heartbeat). */
