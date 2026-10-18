@@ -150,7 +150,7 @@ export function describeVideoChanges(cur = [], next = []) {
 
 // ---------- the rules chat ----------
 
-const OPS = ["budget", "unwatch", "site", "unsite", "addVideo", "videoBudget", "dropVideo", "dayStart"];
+const OPS = ["budget", "unwatch", "site", "unsite", "addVideo", "videoBudget", "dropVideo", "dayStart", "examStart", "examEnd"];
 
 function domainOf(raw) {
   const d = String(raw || "").trim().toLowerCase();
@@ -167,6 +167,7 @@ export function applyDiff(rules, diff) {
   const r = structuredClone({ kinds: {}, sites: {}, videos: [], ...rules });
   r.videos = r.videos || [];
   const skipped = [], needsAccess = [];
+  let examEnd = false;
   let n = r.videos.reduce((m, v) => Math.max(m, Number(v.id.slice(1)) || 0), 0);
   for (const op of Array.isArray(diff) ? diff.slice(0, 10) : []) {
     const kind = op && KINDS[op.kind] ? op.kind : null;
@@ -209,6 +210,17 @@ export function applyDiff(rules, diff) {
         r.videos.splice(i, 1);
         break;
       }
+      case "examStart": {
+        // Start exam mode, or move its end later; whether that is now or too far ahead is the engine's call.
+        const until = Number(op.until);
+        if (!Number.isFinite(until)) { skipped.push(op); break; }
+        r.exam = { until, goal: text(op.goal, 200) || (r.exam && r.exam.goal) || "" };
+        break;
+      }
+      case "examEnd":
+        // Ending early is a loosening: it becomes a request to the agent on Apply, never an end by itself.
+        examEnd = true;
+        break;
       case "dayStart": {
         const h = Number(op.hour);
         if (!Number.isInteger(h) || h < 0 || h > 23) { skipped.push(op); break; }
@@ -220,7 +232,7 @@ export function applyDiff(rules, diff) {
     }
   }
   r.videos = cleanVideos(r.videos);
-  return { rules: r, skipped, needsAccess: [...new Set(needsAccess)] };
+  return { rules: r, skipped, needsAccess: [...new Set(needsAccess)], examEnd };
 }
 
 /** The rules as the relay's /rules reads them: no word lists, nothing about today's usage. */

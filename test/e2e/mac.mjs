@@ -16,7 +16,6 @@ const work = mkdtempSync(join(tmpdir(), "gatekeeper-mac-"));
 let browser, failures = 0;
 const check = (name, ok, detail = "") => { console.log(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : "  " + JSON.stringify(detail).slice(0, 400)}`); if (!ok) failures++; };
 process.on("exit", () => { try { browser.kill(); } catch {} try { rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch {} });
-const SENTENCE = "I am choosing to stop preparing for my exam";
 
 // The stand-in bridge: a local server the test copy posts each snapshot to, in place of the one
 // sendNativeMessage call. It records the snapshot and answers with the requests queued for it, as the
@@ -78,7 +77,7 @@ try {
   check("the rules page says the Mac app is connected", /Connected/.test(await p.evaluate(`document.getElementById('mac-sub').textContent`)));
 
   // exam.start from the Mac: applied at once, every kind closed, and reported in the next snapshot.
-  const until = Date.now() + 3600e3;
+  const until = Date.now() + 2 * 86400e3; // past the next morning, so ending early is a real request
   queue.push(...([{ id: "6F1C", type: "exam.start", until, goal: "15.425 midterm" }]));
   await p.send("Page.reload"); await sleep(3000);
   let s = await st();
@@ -89,18 +88,17 @@ try {
   check("YouTube, not even watched, is closed for the exam", /Exam mode until/.test(await p.evaluate(`(document.getElementById('headline') || {}).textContent || ''`)));
 
   // The Mac only tightens: an exam.end from it is refused, even with the sentence.
-  queue.push(...([{ id: "9A21", type: "exam.end", sentence: SENTENCE }]));
+  queue.push(...([{ id: "9A21", type: "exam.end", sentence: "I am choosing to stop preparing for my exam" }]));
   await p.send("Page.navigate", { url: rulesUrl }); await sleep(3000);
   check("exam.end from the Mac is refused, even with the sentence", !!((await st()).rules.exam), (await st()).rules.exam);
-  // "End exam mode early" on the Mac opens pages.exam: the rules page, with the sentence form open.
+  // "End exam mode early" on the Mac opens pages.exam: the rules page, with "End early" ready. Claude help is off
+  // here, so exam mode runs to its end (decision 3), and the page says so.
   await p.send("Page.navigate", { url: base + "/" + first.pages.exam }); await sleep(1500);
-  check("pages.exam opens the end-early form", (await p.evaluate(`!document.getElementById('exam-form').classList.contains('hidden') && document.activeElement && document.activeElement.id === 'exam-sentence'`)) === true);
-  await p.evaluate(`document.getElementById('exam-sentence').value = 'let me out'; document.getElementById('exam-form').requestSubmit();`); await sleep(1200);
-  check("the wrong sentence keeps exam mode on", !!((await st()).rules.exam));
-  await p.evaluate(`document.getElementById('exam-sentence').value = ${JSON.stringify(SENTENCE)}; document.getElementById('exam-form').requestSubmit();`); await sleep(2500);
-  s = await st();
-  check("the sentence, typed in the extension, ends it", !s.rules.exam, s.rules.exam);
-  check("and the next snapshot says so", snapshots().slice(-1)[0].exam === null);
+  check("pages.exam opens the rules page at End early", (await p.evaluate(`document.activeElement && document.activeElement.id`)) === "exam-end-open");
+  await p.evaluate(`document.getElementById('exam-end-open').click()`); await sleep(1500);
+  check("with Claude help off, exam mode runs to its end, and the page says so",
+    /runs to its end/.test(await p.evaluate(`document.getElementById('exam-note').textContent`)) && !!((await st()).rules.exam), await p.evaluate(`document.getElementById('exam-note').textContent`));
+  check("and the snapshot still shows it", snapshots().slice(-1)[0].exam && snapshots().slice(-1)[0].exam.until === until);
 } catch (e) {
   console.log("FAIL", e.message); failures++;
 }

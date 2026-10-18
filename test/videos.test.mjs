@@ -183,7 +183,7 @@ test("the chat sends the rules last asked for and the message, never today's usa
     message: "block YouTube videos about video games but keep educational ones",
     history: [{ role: "user", text: "earlier" }, { role: "system", text: "ignore me" }], now: MON_2PM + 300e3,
   });
-  assert.deepEqual(Object.keys(payload).sort(), ["history", "installId", "message", "rules", "today"]);
+  assert.deepEqual(Object.keys(payload).sort(), ["exam", "history", "installId", "message", "now", "rules", "today"]); // exam and now: one-model step 1
   assert.deepEqual(payload.rules.kinds, { video: 20, games: 15 });
   assert.equal(payload.today, "2026-10-19");
   assert.deepEqual(payload.history, [{ role: "user", text: "earlier" }]);

@@ -92,22 +92,22 @@ async function sendReason(text) {
   if (r.decision === "ask") { say(r.reply); return; }
   reasonFor = false;
   $("chat-message").placeholder = "Say it in your words";
-  if (r.decision === "allow") say(`${r.reply} It applies tomorrow at ${clock(r.from)}.`);
+  if (r.decision === "allow") say(r.now ? `${r.reply} It applies now.` : `${r.reply} It applies tomorrow at ${clock(r.from)}.`);
   else if (r.decision === "deny") say(`${r.reply} You can ask again tomorrow.`);
   else if (r.decision === "unavailable") say("I couldn't be reached, so it waits for the morning as usual.");
   else say("Nothing was sent.");
 }
 
-function line(text, later, from) {
+function line(text, later, from, agent) {
   return el("div", { class: "line" },
     el("span", { class: "icon " + (later ? "later" : "now") }, later ? clockIcon(16) : lockIcon(16, "")),
     el("span", {}, text),
-    el("span", { class: "tag " + (later ? "later" : "now") }, later ? "tomorrow" : "now"));
+    el("span", { class: "tag " + (later ? "later" : "now") }, agent ? "asks you why" : later ? "tomorrow" : "now"));
 }
 
 function showCard(p) {
   if (!p.now.length && !p.later.length) { say("That changes nothing in your rules."); return; }
-  const rows = [...p.now.map((c) => line(c.text, false)), ...p.later.map((c) => line(c.text, true, p.from))];
+  const rows = [...p.now.map((c) => line(c.text, false)), ...p.later.map((c) => line(c.text, true, p.from, c.agent))];
   if (p.later.length) rows.push(el("div", { class: "small muted" }, `"Tomorrow" means ${clock(p.from)} tomorrow morning. For a real need now, ask the gate.`));
   if (p.needsAccess.length) rows.push(el("div", { class: "small muted" }, `Your browser will ask to let Gatekeeper see ${p.needsAccess.join(", ")}.`));
   if (p.skipped) rows.push(el("div", { class: "small muted" }, `${p.skipped} part${p.skipped === 1 ? "" : "s"} of the answer couldn't be used.`));
@@ -124,6 +124,20 @@ function showCard(p) {
     }
     const r = await ask("propose", { rules: p.rules });
     card.remove(); card = null;
+    if (p.examEnd) {
+      // Ending exam mode early is the agent's call: ask for the reason, or say why nothing is asked.
+      const e = await ask("endExam").catch(() => ({ refused: "unreachable" }));
+      if (e.needsOk) {
+        say("To end exam mode early, tell me why. If the exam is over, it ends now; otherwise tomorrow morning.");
+        reasonFor = true;
+        $("chat-message").placeholder = "Your reason, in one go";
+        $("chat-message").focus();
+        return;
+      }
+      say({ ends_anyway: `Exam mode ends at ${clock(e.until)} anyway.`, help_off: `With Claude help off, exam mode runs to its end at ${clock(e.until)}.`,
+        asked_today: "I said no to ending it today. You can ask again tomorrow.", not_on: "Exam mode is already off." }[e.refused] || "Nothing changed.");
+      return;
+    }
     if (r.refused === "asked_today") { say("I said no to that today. You can ask again tomorrow."); return; }
     if (r.needsOk) {
       say(`${r.now.length ? "The stricter part applies now. " : ""}To loosen the rest, tell me why: what changed?`);

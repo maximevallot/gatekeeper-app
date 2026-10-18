@@ -297,10 +297,11 @@ const handlers = {
     return preview.error ? { failed: preview.error } : preview;
   },
   // The watch week: start it from the welcome tab, end it early with one tap, and mark its summary seen.
-  async endExam({ sentence }) {
-    const out = await update((s) => engine.endExam(s, sentence, Date.now()));
+  // Ending exam mode early: a request to the agent, or a reason why nothing is asked (decision 3).
+  async endExam() {
+    const out = await update((s) => engine.endExam(s, Date.now()));
     macSync(true);
-    return { ok: !out.refused, refused: out.refused, needsOk: !!out.needsOk };
+    return { refused: out.refused, until: out.until, needsOk: !!out.needsOk };
   },
   // The reason for a loosening, to the agent who holds the key. Out of reach: the morning rule, as before.
   async loosen({ message }) {

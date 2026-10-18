@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   initialState, completeSetup, decide, tick, proposeRules, closedDomains, gateRequest, setHelp, startExam, endExam, examOn,
-  applyMacRequest, snapshot, snapshotKey, todaySummary, rollover, EXAM_END_SENTENCE,
+  applyMacRequest, snapshot, snapshotKey, todaySummary, rollover,
 } from "../extension/engine/engine.js";
 
 const at = (iso) => new Date(iso).getTime();
@@ -38,27 +38,28 @@ test("the later end wins; an earlier one, or no exam at all, does not shorten it
   assert.ok(startExam(setUp({}), { until: MON + 60 * 86400e3 }, MON).state.rules.exam.until <= MON + 14 * 86400e3, "at most 14 days");
 });
 
-test("the Mac can only tighten: exam.end is refused even with the sentence", () => {
+test("the Mac can only tighten: exam.end is refused", () => {
   const s = startExam(setUp({}), { until: WED }, MON).state;
-  for (const req of [{ type: "exam.end", sentence: EXAM_END_SENTENCE }, { type: "exam.end" }, { type: "exam.pause" }]) {
+  for (const req of [{ type: "exam.end", sentence: "I am choosing to stop preparing for my exam" }, { type: "exam.end" }, { type: "exam.pause" }]) {
     const r = applyMacRequest(s, req, MON);
     assert.equal(r.refused, "unknown_type", req.type);
     assert.ok(examOn(r.state));
   }
 });
 
-test("ending exam mode early, in the extension, takes the sentence word for word", () => {
+test("ending exam mode early (decision 3): with Claude help off it runs to its end; ending before morning anyway asks nothing", () => {
   const s = startExam(setUp({}), { until: WED }, MON).state;
-  assert.equal(endExam(s, "stop", MON).refused, "wrong_sentence");
-  const off = endExam(s, "  " + EXAM_END_SENTENCE + " ", MON).state;
-  assert.ok(!examOn(off));
-  assert.equal(decide(off, { url: "https://www.youtube.com/", now: MON }).verdict, "allow");
-  assert.equal(endExam(off, EXAM_END_SENTENCE, MON).refused, "not_on");
+  assert.equal(endExam(s, MON).refused, "help_off");
+  assert.ok(examOn(endExam(s, MON).state));
+  const soon = startExam(setHelp(setUp({}), true), { until: MON + 3 * 3600e3 }, MON).state;
+  assert.equal(endExam(soon, MON).refused, "ends_anyway");
+  assert.equal(endExam(setUp({}), MON).refused, "not_on");
+  const dropped = proposeRules(s, { ...s.rules, exam: null }, MON).state;
+  assert.equal(rollover(dropped, at("2026-10-20T04:00:01-04:00")).rules.exam.until, WED, "a rule change never ends exam mode");
 });
 
-test("in exam mode the gate does not talk, and nothing counts", () => {
+test("in exam mode nothing counts", () => {
   let s = setHelp(startExam(setUp({ video: 20 }), { until: WED }, MON).state, true);
-  assert.equal(gateRequest(s, { url: "https://www.youtube.com/", message: "lecture 6", now: MON }).refused, "exam");
   s = tick(s, visit("https://www.youtube.com/", MON)).state;
   assert.equal(s.usage.seconds.video || 0, 0);
 });

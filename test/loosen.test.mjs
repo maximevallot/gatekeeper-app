@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   initialState, completeSetup, proposeRules, rollover, decide, setHelp, loosenRequest, applyLoosenAnswer, loosenUnavailable,
-  startExam, endExam, examOn, weekSummary, EXAM_END_SENTENCE, WHATS_SENT, CONSENT,
+  startExam, endExam, examOn, weekSummary, WHATS_SENT, CONSENT,
 } from "../extension/engine/engine.js";
 
 const at = (iso) => new Date(iso).getTime();
@@ -81,22 +81,23 @@ test("without Claude help, or with the agent out of reach, a loosening waits for
   assert.equal(u.loosenLog.at(-1).decision, "unavailable");
 });
 
-test("ending exam mode early: the sentence, then the agent; a yes ends it the next morning", () => {
+test("ending exam mode early: the agent decides; a yes ends it at once if the exam is done, else the next morning", () => {
   const WED = at("2026-10-22T08:30:00-04:00");
-  let s = startExam(setUp(), { until: WED, goal: "midterm" }, MON).state;
-  assert.equal(endExam(s, "stop", MON).refused, "wrong_sentence");
-  const e = endExam(s, EXAM_END_SENTENCE, MON);
+  const s = startExam(setUp(), { until: WED, goal: "midterm" }, MON).state;
+  const e = endExam(s, MON);
   assert.equal(e.needsOk, true);
   assert.ok(examOn(e.state), "not before the agent's yes");
   assert.equal(loosenRequest(e.state, { message: "The exam was moved to next month", now: MON }).payload.kind, "exam");
   const y = applyLoosenAnswer(e.state, { answer: yes, now: MON }).state;
   assert.ok(examOn(y), "still on tonight");
   assert.ok(!examOn(rollover(y, TUE)), "over in the morning");
+  const done = applyLoosenAnswer(e.state, { answer: { ...yes, examDone: true }, now: MON });
+  assert.ok(!examOn(done.state), "the exam is over: it ends at once");
+  assert.equal(done.result.now, true);
   const n = applyLoosenAnswer(e.state, { answer: no, now: MON }).state;
   assert.ok(examOn(rollover(n, TUE)));
-  assert.equal(endExam(n, EXAM_END_SENTENCE, MON).refused, "asked_today");
-  // Without Claude help, the sentence ends it at once, as before.
-  assert.ok(!examOn(endExam(startExam(setUp(false), { until: WED }, MON).state, EXAM_END_SENTENCE, MON).state));
+  assert.equal(endExam(n, MON).refused, "asked_today");
+  assert.ok(examOn(loosenUnavailable(e.state, { now: MON }).state), "out of reach: it runs to its end, as with Claude help off");
 });
 
 test("every request and answer is logged on the device, and the week counts them", () => {

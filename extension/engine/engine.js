@@ -651,6 +651,8 @@ export function minutesText(m) {
 export function proposeRules(state, next, now) {
   const s = rollover(state, now);
   const want = cleanRules({ dayStart: s.rules.dayStart, ...next }, s.rules);
+  // Exam mode in force is never ended or shortened by a rule change; only endExam (the agent) does that.
+  if (examOn(s) && (!want.exam || want.exam.until < s.rules.exam.until)) want.exam = s.rules.exam;
   const applied = tighten(s.rules, want, s);
   const nowChanges = describeChanges(s.rules, applied);
   const keepExamAsk = s.loosen && s.loosen.kind === "exam" ? s.loosen : null;
@@ -836,8 +838,19 @@ export function chatRequest(state, { message, history = [], now }) {
     payload: {
       installId: s.installId, message: text.slice(0, MAX_MESSAGE), history: turns,
       rules: rulesForChat(wantedRules(s)), today: dayKey(s.clock.floor, s.rules.dayStart),
+      // Exam mode and the time of day, so "until Wednesday 8:30" and "end exam mode" can be understood.
+      exam: examOn(s) ? { until: s.rules.exam.until, goal: s.rules.exam.goal || "" } : null,
+      now: localIso(s.clock.floor),
     },
   };
+}
+
+/** "2026-10-17T14:05:00-04:00": local time with its offset. */
+export function localIso(t) {
+  const d = new Date(t);
+  const p = (n) => String(Math.abs(n)).padStart(2, "0");
+  const off = -d.getTimezoneOffset();
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}${off >= 0 ? "+" : "-"}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`;
 }
 
 /**
@@ -850,20 +863,29 @@ export function chatPreview(state, answer, now) {
   const question = answer && typeof answer.question === "string" && answer.question.trim() ? answer.question.slice(0, 300) : null;
   if (!answer || (!reply && !question)) return { error: "bad_answer" };
   const s = rollover(state, now);
-  const { rules, skipped, needsAccess } = applyDiff(wantedRules(s), question ? [] : answer.diff);
+  const { rules, skipped: skippedOps, needsAccess, examEnd } = applyDiff(wantedRules(s), question ? [] : answer.diff);
+  const skipped = [...skippedOps];
+  // An exam start must lie ahead and within MAX_EXAM_DAYS; anything else is left out of the card.
+  const asked = rules.exam, had = wantedRules(s).exam;
+  if (asked && asked !== had && (!had || asked.until !== had.until)) {
+    if (asked.until <= s.clock.floor) { rules.exam = had || null; skipped.push({ op: "examStart" }); }
+    else rules.exam = { ...asked, until: Math.min(asked.until, s.clock.floor + MAX_EXAM_DAYS * 86400e3) };
+  }
   const r = proposeRules(s, rules, now);
   // Only what this answer changes: a loosening already waiting for the morning is not shown again.
   const before = proposeRules(s, wantedRules(s), now);
   const fresh = (list, old) => { const seen = new Set(old.map((c) => c.text)); return list.filter((c) => !seen.has(c.text)); };
   const nowChanges = fresh(r.now, before.now), later = fresh(r.later, before.later);
-  return { reply, question, rules, now: nowChanges, later, from: later.length ? r.from : null, skipped: skipped.length, needsAccess };
+  // "End exam mode early" is shown on the card as a loosening for the agent, never as done.
+  const end = examEnd && examOn(s) ? { text: "End exam mode early", agent: true } : null;
+  return { reply, question, rules, now: nowChanges, later: end ? [...later, end] : later, from: later.length || end ? r.from : null,
+    skipped: skipped.length, needsAccess, examEnd: !!end };
 }
 
 // ---------- exam mode ----------
-// Until a set time, every kind is closed and the gate does not talk. Starting it or moving its end later is a
-// tightening and applies at once; ending it early takes the sentence below, typed in full.
+// Until a set time, every kind is closed. Starting it or moving its end later is a tightening and applies at
+// once; ending it early is a loosening the agent decides (see endExam).
 
-export const EXAM_END_SENTENCE = "I am choosing to stop preparing for my exam";
 export const MAX_EXAM_DAYS = 14;
 
 export function examOn(state) {
@@ -884,17 +906,19 @@ export function startExam(state, { until, goal }, now) {
 }
 
 /** End exam mode now, but only with the sentence, word for word. */
-export function endExam(state, sentence, now) {
-  const s = rollover(state, now);
-  if (String(sentence || "").replace(/\s+/g, " ").trim() !== EXAM_END_SENTENCE) return { state: s, refused: "wrong_sentence" };
+/**
+ * Ask to end exam mode early (decision of 2026-10-17, "agent decides, now if done"). It is a loosening: the
+ * agent decides from the reason. A yes ends it at once if the exam is over, else the next morning. With
+ * Claude help off it runs to its set end. If it ends before the next morning anyway, nothing is asked.
+ */
+export function endExam(state, now) {
+  const s = rollover(state, typeof now === "object" ? now.now : now);
   if (!examOn(s)) return { state: s, refused: "not_on" };
-  if (consented(s, "talk")) {
-    // With Claude help on, ending early is a loosening: the agent holds the key, and a yes ends it next morning.
-    const key = "exam:" + s.rules.exam.until;
-    if (((s.denied || {})[key] || 0) > s.clock.floor) return { state: s, refused: "asked_today" };
-    return { state: { ...s, loosen: { kind: "exam", changes: ["End exam mode early"], key, asked: "" } }, needsOk: true };
-  }
-  return { state: examEnd(s, s.clock.floor) };
+  if (s.rules.exam.until <= s.usage.endsAt) return { state: s, refused: "ends_anyway", until: s.rules.exam.until };
+  if (!consented(s, "talk")) return { state: s, refused: "help_off", until: s.rules.exam.until };
+  const key = "exam:" + s.rules.exam.until;
+  if (((s.denied || {})[key] || 0) > s.clock.floor) return { state: s, refused: "asked_today" };
+  return { state: { ...s, loosen: { kind: "exam", changes: ["End exam mode early"], key, asked: "" } }, needsOk: true };
 }
 
 /** Exam mode ends at `at` (now, or the next morning), in the rules in force and in what waits. */
@@ -939,8 +963,10 @@ export function applyLoosenAnswer(state, { answer, message = "", now }) {
   }
   if (answer.decision === "allow") {
     const morning = s.usage.endsAt;
-    s = l.kind === "exam" ? examEnd(s, morning) : { ...s, pending: s.pending ? { ...s.pending, ok: true, from: Math.max(s.pending.from, morning) } : null };
-    return { state: { ...s, loosen: null, loosenLog: log("allow") }, result: { decision: "allow", reply: answer.reply, from: morning } };
+    // For exam mode: at once if the agent says the exam is over (examDone), else the next morning.
+    const at = l.kind === "exam" && answer.examDone === true ? s.clock.floor : morning;
+    s = l.kind === "exam" ? examEnd(s, at) : { ...s, pending: s.pending ? { ...s.pending, ok: true, from: Math.max(s.pending.from, morning) } : null };
+    return { state: { ...s, loosen: null, loosenLog: log("allow") }, result: { decision: "allow", reply: answer.reply, from: at, now: at === s.clock.floor } };
   }
   // No (or a second question): the rule stays, and the same request waits until tomorrow.
   s = { ...s, pending: l.kind === "rules" ? null : s.pending, denied: { ...(s.denied || {}), [l.key]: s.usage.endsAt }, loosen: null, loosenLog: log("deny") };
@@ -952,7 +978,8 @@ export function loosenUnavailable(state, { message = "", error = "", now }) {
   let s = rollover(state, now);
   const l = s.loosen;
   if (!l) return { state };
-  s = l.kind === "exam" ? examEnd(s, s.clock.floor) : { ...s, pending: s.pending ? { ...s.pending, ok: true } : null };
+  // Rules wait for the morning, as without an agent; exam mode runs to its set end, as with Claude help off.
+  s = l.kind === "exam" ? s : { ...s, pending: s.pending ? { ...s.pending, ok: true } : null };
   return { state: { ...s, loosen: null, loosenLog: logLoosen(s, { kind: l.kind, changes: l.changes, message: String(message).slice(0, MAX_MESSAGE), decision: "unavailable", reply: String(error).slice(0, 80) }) } };
 }
 

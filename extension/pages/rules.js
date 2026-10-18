@@ -1,7 +1,7 @@
 // Your rules, saved as you go. Every change goes through the engine's proposeRules: what tightens applies
 // now, what loosens waits for the morning and shows as an amber row with a way to keep today's number.
 import { KINDS, KIND_ORDER } from "../engine/catalog.js";
-import { DEFAULT_MINUTES, label, examOn, EXAM_END_SENTENCE } from "../engine/engine.js";
+import { DEFAULT_MINUTES, label, examOn } from "../engine/engine.js";
 import { videoName } from "../engine/videos.js";
 import {
   ask, el, when, clock, stepper, checkWorker, warnings, whatsSentToggle, chatIcon, privateToggle, extensionsPage,
@@ -210,25 +210,27 @@ function renderExam() {
   if (!on) return;
   $("exam-title").textContent = `Exam mode until ${when(s.rules.exam.until)}`;
   $("exam-goal").textContent = s.rules.exam.goal || "Every kind of site is closed until then.";
-  $("exam-hint").textContent = `To end it now, type: ${EXAM_END_SENTENCE}`;
   // The Mac app's "End exam mode early" opens this page at #exam.
-  if (location.hash === "#exam" && !renderExam.opened) {
-    renderExam.opened = true;
-    $("exam-form").classList.remove("hidden");
-    $("exam-sentence").focus();
-  }
+  if (location.hash === "#exam" && !renderExam.opened) { renderExam.opened = true; $("exam-end-open").focus(); }
 }
-// Also when this page is already open and the Mac app sends it to #exam.
 window.addEventListener("hashchange", () => { renderExam.opened = false; if (got) renderExam(); });
-$("exam-end-open").addEventListener("click", () => { $("exam-form").classList.toggle("hidden"); $("exam-sentence").focus(); });
-$("exam-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const r = await ask("endExam", { sentence: $("exam-sentence").value }).catch(() => ({ refused: "unreachable" }));
-  saved(r.needsOk ? "To end it early, tell Gatekeeper why" : r.ok ? "Exam mode is off"
-    : r.refused === "wrong_sentence" ? "That isn't the sentence; exam mode stays on"
-    : r.refused === "asked_today" ? "Gatekeeper said no to that today. Ask again tomorrow." : "Not saved");
-  $("exam-sentence").value = "";
-  load();
+
+// Ending early asks the agent (decision of 2026-10-17): a yes ends it at once if the exam is over, else the
+// next morning. With Claude help off it runs to its set end.
+$("exam-end-open").addEventListener("click", async () => {
+  const r = await ask("endExam").catch(() => ({ refused: "unreachable" }));
+  const note = {
+    ends_anyway: `It ends ${when(r.until)} anyway, before the next morning. Nothing to ask.`,
+    help_off: `With Claude help off, exam mode runs to its end, ${when(r.until)}.`,
+    asked_today: "Gatekeeper said no to that today. Ask again tomorrow.",
+    not_on: "Exam mode is already off.",
+    unreachable: "Not saved: Gatekeeper's background didn't answer.",
+  }[r.refused];
+  $("exam-note").textContent = note || "";
+  $("exam-note").classList.toggle("hidden", !note);
+  if (r.needsOk) saved("To end it early, tell Gatekeeper why");
+  await load();
+  if (r.needsOk) $("loosen-message").focus();
 });
 
 // ---------- the key to loosening ----------
@@ -252,7 +254,7 @@ $("loosen-form").addEventListener("submit", async (e) => {
   $("loosen-send").disabled = true;
   const r = await ask("loosen", { message: text }).catch(() => ({ decision: "unavailable" }));
   $("loosen-send").disabled = false;
-  if (r.decision === "allow") { loosenSay(r.reply); saved(`Agreed: it applies ${when(r.from)}`); }
+  if (r.decision === "allow") { loosenSay(r.reply); saved(r.now ? "Agreed: it applies now" : `Agreed: it applies ${when(r.from)}`); }
   else if (r.decision === "ask") { loosenSay(r.reply); $("loosen-message").focus(); return; }
   else if (r.decision === "deny") { loosenSay(r.reply); saved("The rule stays. You can ask again tomorrow."); }
   else if (r.decision === "unavailable") saved("Couldn't reach Gatekeeper's agent, so it waits for the morning as usual");
