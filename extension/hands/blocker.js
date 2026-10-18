@@ -42,6 +42,8 @@ export function buildRules({ redirect = [], block = [], allowVideos = [], closeV
     rules.push({ id: id++, priority: 1, action: { type: "redirect", redirect: { regexSubstitution: gatePage + "#\\0" } },
       condition: { regexFilter: "^https?://.*", resourceTypes: ["main_frame"] } });
     if (examAll.allow.length) rules.push({ id: id++, priority: 3, action: { type: "allow" }, condition: { requestDomains: examAll.allow, resourceTypes: ["main_frame"] } });
+    // Search result pages, so a student who doesn't know Canvas's address can find it.
+    for (const urlFilter of examAll.allowUrls || []) rules.push({ id: id++, priority: 3, action: { type: "allow" }, condition: { urlFilter, resourceTypes: ["main_frame"] } });
   }
   if (allowSites.length) {
     rules.push({ id: id++, priority: 3, action: { type: "allow" }, condition: { requestDomains: allowSites, resourceTypes: ["main_frame", "sub_frame"] } });

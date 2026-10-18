@@ -96,7 +96,7 @@ test("loosening waits until the next morning, and can be cancelled", () => {
   assert.equal(r.state.rules.kinds.games.minutes, 15, "tonight stays at 15");
   assert.ok(r.state.rules.kinds.social, "dropping a kind waits too");
   assert.equal(r.from, at("2026-10-20T04:00:00-04:00"));
-  assert.deepEqual(r.later.map((c) => c.text).sort(), ["Games: 15 min a day → 60 min a day", "Social media: no longer watched"]);
+  assert.deepEqual(r.later.map((c) => c.text).sort(), ["Games: 15 min a day → 60 min a day", "Social media: limit removed"]);
   // Still 15 at 3:59, 60 at 4:00.
   assert.equal(rollover(r.state, at("2026-10-20T03:59:00-04:00")).rules.kinds.games.minutes, 15);
   const morning = rollover(r.state, at("2026-10-20T04:00:00-04:00"));

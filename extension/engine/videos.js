@@ -150,7 +150,7 @@ export function describeVideoChanges(cur = [], next = []) {
 
 // ---------- the rules chat ----------
 
-const OPS = ["budget", "unwatch", "site", "unsite", "siteLimit", "dropSiteLimit", "addVideo", "videoBudget", "dropVideo", "dayStart", "examStart", "examEnd"];
+const OPS = ["budget", "unwatch", "site", "unsite", "siteLimit", "dropSiteLimit", "study", "unstudy", "addVideo", "videoBudget", "dropVideo", "dayStart", "examStart", "examEnd"];
 // Earlier names for a site's own limit, from before the relay's were settled: read as the same.
 const ALIASES = { siteBudget: "siteLimit", dropSite: "dropSiteLimit" };
 
@@ -202,6 +202,19 @@ export function applyDiff(rules, diff) {
         if (!d || (m !== null && !Number.isFinite(m))) { skipped.push(op); break; }
         r.siteLimits[d] = m === null ? null : Math.min(Math.max(Math.round(m), 0), 1440);
         if (!catalogKind(d)) needsAccess.push(d);
+        break;
+      }
+      case "study": {
+        // A study site: open in exam mode ("I need canvas.mit.edu to study").
+        const d = domainOf(op.domain);
+        if (!d) { skipped.push(op); break; }
+        r.study = [...new Set([...(r.study || []), d])];
+        break;
+      }
+      case "unstudy": {
+        const d = domainOf(op.domain);
+        if (!d || !(r.study || []).includes(d)) { skipped.push(op); break; }
+        r.study = r.study.filter((x) => x !== d);
         break;
       }
       case "dropSiteLimit": {
@@ -261,6 +274,7 @@ export function rulesForChat(rules) {
     kinds: Object.fromEntries(Object.entries(rules.kinds || {}).map(([k, v]) => [k, v.minutes])),
     sites: { ...(rules.sites || {}) },
     siteLimits: { ...(rules.siteLimits || {}) },
+    study: [...(rules.study || [])],
     videos: (rules.videos || []).map(({ id, site, about, except, minutes }) => ({ id, site, about, except, minutes })),
     dayStart: rules.dayStart,
   };

@@ -3,6 +3,7 @@
 import { KINDS, KIND_ORDER, catalogKind } from "../engine/catalog.js";
 import { DEFAULT_MINUTES, label, examOn } from "../engine/engine.js";
 import { videoName } from "../engine/videos.js";
+import { calendarProblem, CALENDAR_HELP } from "../engine/calendar.js";
 import {
   ask, el, when, clock, stepper, checkWorker, warnings, whatsSentToggle, chatIcon, privateToggle, extensionsPage,
   getAppearance, setAppearance, examForm,
@@ -32,7 +33,7 @@ async function propose(rules, extra = {}, undoable = true) {
     const r = await ask("propose", { rules, ...extra });
     const tightened = r.now && r.now.length;
     saved(r.refused === "asked_today" ? "Gatekeeper said no to a loosening today. Ask again tomorrow."
-      : r.refused === "help_off_today" ? "Claude help was turned off today, so nothing loosens until tomorrow."
+      : r.refused === "help_off_today" ? "AI help was turned off today, so nothing loosens until tomorrow."
       : r.needsOk ? "Saved. To loosen it, tell Gatekeeper why."
       : r.later && r.later.length ? `Saved. Loosening applies ${when(r.from)}.` : tightened ? "Saved" : "Saved",
     undoable && tightened ? before : null);
@@ -46,7 +47,7 @@ async function propose(rules, extra = {}, undoable = true) {
 
 function subtitle(kind, rules, state) {
   const own = Object.entries(rules.sites || {}).filter(([, k]) => k === kind).map(([d]) => `${d} (you added)`);
-  const sorted = Object.entries(state.sorted || {}).filter(([d, k]) => k === kind && !(d in (rules.sites || {}))).map(([d]) => `${d} (sorted by Claude)`);
+  const sorted = Object.entries(state.sorted || {}).filter(([d, k]) => k === kind && !(d in (rules.sites || {}))).map(([d]) => `${d} (sorted by AI help)`);
   const known = KINDS[kind].examples.split(", ");
   const total = KINDS[kind].domains.length + own.length + sorted.length;
   const shown = [...known.slice(0, 3), ...own.slice(0, 2), ...sorted.slice(0, 1)];
@@ -73,8 +74,8 @@ function videoChips(rules) {
 function pendingRow(kind, inForce, want) {
   const now = got.state.pending && got.state.pending.from;
   if (inForce && !want) {
-    return el("div", { class: "note", "data-pending": kind }, el("span", {}, `Stops being watched ${when(now)}`),
-      el("button", { class: "link", type: "button", onclick: () => keep(kind, inForce) }, "Keep watching"));
+    return el("div", { class: "note", "data-pending": kind }, el("span", {}, `Limit ends ${when(now)}`),
+      el("button", { class: "link", type: "button", onclick: () => keep(kind, inForce) }, "Keep the limit"));
   }
   const asking = got.state.pending && got.state.pending.ok === false;
   if (inForce && want && want.minutes !== inForce.minutes) {
@@ -163,7 +164,7 @@ function renderKinds() {
   const chips = !watched.includes("video") && videoChips(rules);
   if (chips) {
     rows.push(el("div", { class: "rowblock", "data-kind": "videos-only" },
-      el("div", { class: "stack" }, el("div", { class: "name" }, "YouTube videos"), el("div", { class: "sub" }, "Video isn't watched; these rules still apply.")),
+      el("div", { class: "stack" }, el("div", { class: "name" }, "YouTube videos"), el("div", { class: "sub" }, "Video has no limit; these rules still apply.")),
       chips));
   }
   const limited = [...new Set([...Object.keys(rules.siteLimits || {}), ...Object.keys(state.rules.siteLimits || {})])].sort();
@@ -174,7 +175,7 @@ function renderKinds() {
       b.addEventListener("click", () => { const r = wanted(); r.kinds[k] = { minutes: DEFAULT_MINUTES }; propose(r); });
       return i ? [", ", b] : [b];
     });
-    rows.push(el("div", { class: "row muted small" }, el("span", {}, "Not watched: ", ...links, ". Tap one to add it.")));
+    rows.push(el("div", { class: "row muted small" }, el("span", {}, "No limit: ", ...links, ". Tap one to add it.")));
   }
   rows.push(addSiteRow());
   $("kinds").replaceChildren(...rows);
@@ -185,6 +186,7 @@ function addSiteRow() {
     el("input", { class: "field", id: "new-site", placeholder: "example.com", autocomplete: "off", "aria-label": "A site to add" }),
     el("select", { class: "field", id: "new-kind", style: "flex: 0 0 140px", "aria-label": "Its limit" },
       el("option", { value: "" }, "Its own limit"),
+      el("option", { value: "study" }, "A study site (open in exam mode)"),
       ...KIND_ORDER.map((k) => el("option", { value: k }, `Counts as ${KINDS[k].label.toLowerCase()}`))),
     el("button", { class: "btn", type: "submit" }, "Add"));
   const open = el("button", { class: "link", type: "button", style: "align-self: flex-start" }, "Limit one site");
@@ -196,10 +198,11 @@ function addSiteRow() {
     if (!d.includes(".")) return;
     const kind = $("new-kind").value;
     // Gatekeeper may act only on the sites in its catalog; any other is asked for here, inside the click.
-    const access = kind || !catalogKind(d) ? chrome.permissions.request({ origins: [`*://*.${d}/*`] }) : Promise.resolve(true);
+    const access = kind === "study" ? Promise.resolve(true) : kind || !catalogKind(d) ? chrome.permissions.request({ origins: [`*://*.${d}/*`] }) : Promise.resolve(true);
     access.then((granted) => {
       if (!granted) { saved(`Not added: Gatekeeper needs access to ${d}`); return; }
       if (!kind) { setLimit(d, DEFAULT_MINUTES); return; } // its own limit, counted against nothing else
+      if (kind === "study") { const r = wanted(); r.study = [...new Set([...(r.study || []), d])]; propose(r); return; }
       const r = wanted();
       r.sites = { ...(r.sites || {}), [d]: kind };
       propose(r);
@@ -232,10 +235,10 @@ $("help-sent").append(sent.list);
 
 $("help").addEventListener("change", () => {
   const on = $("help").checked;
-  // Sorting new sites needs to see every site; the browser asks, and the request has to start in the click.
-  const permission = on ? chrome.permissions.request({ origins: ["*://*/*"] }).catch(() => false) : chrome.permissions.remove({ origins: ["*://*/*"] }).catch(() => false);
-  permission.then(async () => {
-    try { await ask("consent", { help: on }); saved(on ? "Claude help is on" : "Claude help is off: nothing is sent"); }
+  // Access to every site is asked only where it is first needed, when exam mode starts (tester run, #4); turning
+  // AI help on doesn't ask for it.
+  Promise.resolve().then(async () => {
+    try { await ask("consent", { help: on }); saved(on ? "AI help is on" : "AI help is off: nothing is sent"); }
     catch { saved("Not saved: Gatekeeper's background didn't answer"); }
     await load();
   });
@@ -269,7 +272,7 @@ function renderExam() {
   // Everything but study is closed; sites Gatekeeper doesn't know can only be closed where it may see every site.
   $("exam-goal").textContent = (s.rules.exam.goal ? s.rules.exam.goal + ". " : "") + (got.seeAll
     ? "Everything but study sites is closed until then."
-    : "Every kind of site is closed until then. Sites Gatekeeper doesn't know stay open: turn on Claude help and let it see all sites to close them.");
+    : "Every kind of site is closed until then. Sites Gatekeeper doesn't know stay open: let Gatekeeper see all sites to close them.");
   // The Mac app's "End exam mode early" opens this page at #exam.
   if (location.hash === "#exam" && !renderExam.opened) { renderExam.opened = true; $("exam-end-open").focus(); }
 }
@@ -290,7 +293,7 @@ $("exam-end-open").addEventListener("click", async () => {
   const r = await ask("endExam").catch(() => ({ refused: "unreachable" }));
   const note = {
     ends_anyway: `It ends ${when(r.until)} anyway, before the next morning. Nothing to ask.`,
-    help_off: `With Claude help off, exam mode runs to its end, ${when(r.until)}.`,
+    help_off: `With AI help off, exam mode runs to its end, ${when(r.until)}.`,
     asked_today: "Gatekeeper said no to that today. Ask again tomorrow.",
     not_on: "Exam mode is already off.",
     unreachable: "Not saved: Gatekeeper's background didn't answer.",
@@ -337,10 +340,13 @@ $("loosen-form").addEventListener("submit", async (e) => {
 
 function renderCalendar() {
   const c = got.state.calendar;
+  // Connected with its next deadline, or not working and why (Maxime's re-test, 2026-10-18).
+  const next = c && (c.events || []).find((e) => e.start >= got.now);
+  const read = c && c.fetchedAt ? when(c.fetchedAt).replace(/^today at /, "today, ") : "";
   $("calendar-sub").textContent = !c
-    ? "Paste a calendar link once, and exam mode offers itself before an exam. It's read on this computer only."
-    : c.error ? `Couldn't read the calendar (${c.error}).`
-    : `Connected: ${c.events.length} event${c.events.length === 1 ? "" : "s"} in the next two weeks. Read on this computer once a day.`;
+    ? "Paste a calendar feed link once, and exam mode offers itself before an exam. It's read on this computer only."
+    : c.error ? `Not working: ${CALENDAR_HELP[c.error] || (c.error === "unreachable" ? "it couldn't be reached. Gatekeeper tries again in an hour." : `it couldn't be read (${c.error}).`)}`
+    : `Connected${next ? `: next, ${next.title}, ${when(next.start)}` : ", with nothing in the next two weeks"}. Last read ${read}.`;
   $("calendar-edit").textContent = c ? "Disconnect" : "Connect";
 }
 $("calendar-edit").addEventListener("click", async () => {
@@ -352,12 +358,22 @@ $("calendar-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const raw = $("calendar-url").value.trim().replace(/^webcals?:\/\//i, "https://");
   let origin;
-  try { origin = new URL(raw).origin; } catch { saved("That isn't a calendar link"); return; }
+  try { origin = new URL(raw).origin; } catch { $("calendar-hint").textContent = CALENDAR_HELP.bad_url; saved("That isn't a calendar link"); return; }
+  // A Google share link is said at once, before asking the browser for anything.
+  const problem = calendarProblem(raw);
+  if (problem) { $("calendar-hint").textContent = "Not connected. " + CALENDAR_HELP[problem]; saved("Not connected"); return; }
   // Reading the link needs the browser's yes for that one site, asked inside the click.
   chrome.permissions.request({ origins: [origin + "/*"] }).then(async (granted) => {
     if (!granted) { saved("Not connected: Gatekeeper needs to read that site"); return; }
     const r = await ask("setCalendar", { url: raw }).catch(() => ({ refused: "unreachable" }));
-    saved(r.refused ? "Not connected" : r.error ? `Connected, but couldn't read it yet (${r.error})` : `Connected: ${r.events} events`);
+    if (r.refused) {
+      // Said plainly, with where to find the right link; the field stays open to paste it.
+      $("calendar-hint").textContent = "Not connected. " + (CALENDAR_HELP[r.refused] || "Gatekeeper's background didn't answer; try again.");
+      saved("Not connected");
+      await load();
+      return;
+    }
+    saved(r.error ? `Connected, but couldn't read it yet (${r.error})` : `Connected: ${r.events} events`);
     $("calendar-form").classList.add("hidden");
     await load();
   });
@@ -371,6 +387,8 @@ async function renderMac() {
   // and that a reload connects it, rather than showing the switch off.
   const m = await ask("mac").catch(async () => ({ permitted: await chrome.permissions.contains(NATIVE).catch(() => false), error: "reload_needed" }));
   m.error = m.macError || m.error;
+  // Testers can't get Gatekeeper for Mac yet: its switch shows only once a Mac app has answered, or it is on.
+  $("mac-row").classList.toggle("hidden", !m.seen && !m.permitted);
   $("mac").checked = !!m.permitted;
   $("mac-sub").textContent = !m.permitted
     ? "Off. With Gatekeeper for Mac on, your goal, each kind's minutes today and exam mode go to a file on this Mac that apps you run can read. Nothing goes to a server."
@@ -398,7 +416,7 @@ async function load() {
   if (got.state.watch && !got.state.watch.ended && got.now < got.state.watch.until && !$("watch-note")) {
     const end = el("button", { class: "link", type: "button" }, "Set limits now");
     end.addEventListener("click", () => { location.href = "welcome.html?after=watch"; });
-    $("daily").before(el("div", { class: "note", id: "watch-note" }, el("span", {}, `Watch week until ${when(got.state.watch.until)}: nothing is blocked yet.`), end));
+    $("daily").before(el("div", { class: "note", id: "watch-note" }, el("span", {}, `Your first week, until ${when(got.state.watch.until)}: nothing is blocked yet.`), end));
   }
   if (!warned) warned = warnings({ ...got, incognito: true }, $("daily")) >= 0; // private windows: shown in Settings
   renderKinds();

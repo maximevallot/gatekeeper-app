@@ -73,7 +73,7 @@ export function applyOp(state, op, now) {
     case "consent": return { state: o.help === undefined ? state : engine.setHelp(state, !!o.help, { sorting: !!(o.seeAll ?? o.sorting) }) };
     case "noteGate": return { state: engine.noteGate(state, now) };
     case "sorted": return { state: engine.recordSort(state, String(o.domain || ""), String(o.kind || "")) };
-    case "judged": return { state: engine.recordJudgment(state, o.key, o.rule ?? null, o.by || "words", now) };
+    case "judged": return { state: engine.recordJudgment(state, o.key, o.rule ?? null, o.by || "words", now, { exam: !!o.exam }) };
     default: return { state, refused: ONLINE_OPS.includes(o.type || o.op) ? "online_only" : "unknown_op" };
   }
 }

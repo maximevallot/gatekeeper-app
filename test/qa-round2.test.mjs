@@ -108,14 +108,14 @@ test("#10 (gate H4): exam mode closes everything but study, sites not sorted yet
     assert.equal(decide(s, { url: u, now: SAT }).verdict, "block", u);
   }
   assert.equal(decide(s, { url: "https://never-seen.example/", now: SAT }).unsorted, true);
-  s = recordSort(s, "ocw.mit.edu", "study");
-  assert.equal(decide(s, { url: "https://ocw.mit.edu/courses", now: SAT }).verdict, "allow");
+  s = recordSort(s, "lecturenotes.example", "study");
+  assert.equal(decide(s, { url: "https://lecturenotes.example/courses", now: SAT }).verdict, "allow");
   // With access to every site, every page goes to the gate before it loads, except study sites.
   const e = enforcement(s, SAT, { seeAll: true });
-  assert.deepEqual(e.examAll.allow, ["ocw.mit.edu"]);
+  assert.ok(e.examAll.allow.includes("lecturenotes.example") && e.examAll.allow.includes("instructure.com"));
   const rules = buildRules(e, "chrome-extension://x/pages/gate.html");
   assert.ok(rules.some((r) => r.priority === 1 && r.action.type === "redirect" && r.condition.regexFilter === "^https?://.*"));
-  assert.ok(rules.some((r) => r.priority === 3 && r.action.type === "allow" && r.condition.requestDomains.includes("ocw.mit.edu")));
+  assert.ok(rules.some((r) => r.priority === 3 && r.action.type === "allow" && r.condition.requestDomains && r.condition.requestDomains.includes("lecturenotes.example")));
   assert.equal(enforcement(s, SAT, { seeAll: false }).examAll, null, "without that access it cannot see unknown sites");
   // The gate for an unknown site in exam mode asks the relay as kind "site", budget 0.
   const g = gateRequest(s, { url: "https://wikipedia.org/wiki/NPV", message: "NPV definition for the midterm", now: SAT }).payload;
@@ -160,8 +160,8 @@ test("#16 (first-run H3): one stray tap on − is undone from the rules page wit
   const back = proposeRules(closed.state, { ...closed.state.rules, kinds: { video: { minutes: 5 } } }, SAT + 20e3, { undoable: true });
   assert.equal(back.state.rules.kinds.video.minutes, 5, "the + within a minute undoes it now");
   assert.equal(back.needsOk, undefined);
-  const late = proposeRules(closed.state, { ...closed.state.rules, kinds: { video: { minutes: 5 } } }, SAT + 61e3, { undoable: true });
-  assert.equal(late.state.rules.kinds.video.minutes, 0, "after a minute, it is a loosening like any other");
+  const late = proposeRules(closed.state, { ...closed.state.rules, kinds: { video: { minutes: 5 } } }, SAT + 10 * 60e3 + 1000, { undoable: true });
+  assert.equal(late.state.rules.kinds.video.minutes, 0, "after ten minutes (one before 2026-10-18), it is a loosening like any other");
   assert.equal(late.needsOk, true);
   const further = proposeRules(closed.state, { ...closed.state.rules, kinds: { video: { minutes: 30 } } }, SAT + 20e3, { undoable: true });
   assert.equal(further.state.rules.kinds.video.minutes, 5, "undo goes back to before the tap, no further");

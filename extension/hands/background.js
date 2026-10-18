@@ -212,7 +212,7 @@ async function readCalendar(force = false) {
   if (!s.calendar || (!force && !engine.calendarDue(s, Date.now()))) return;
   try {
     const res = await fetch(s.calendar.url, { credentials: "omit", cache: "no-store" });
-    if (!res.ok) throw new Error("http_" + res.status);
+    if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? "sign_in" : "http_" + res.status);
     const text = (await res.text()).slice(0, 2_000_000);
     await update((st) => ({ state: engine.recordCalendar(st, text, Date.now()) }));
     // The account gets the next 48 hours' events (titles and times), never the link.
@@ -264,6 +264,8 @@ async function macExchange(force) {
   // names what it couldn't read.
   const mac = (reply && reply.mac) || null;
   const outdated = !!(mac && Array.isArray(mac.reads) && !mac.reads.includes(snap.v));
+  // A Mac app answered: from now on the rules page shows its switch (tester run, #5).
+  if (reply) chrome.storage.local.set({ macSeen: true });
   macStatus = {
     connected: !!(reply && reply.ok) && !outdated,
     error: outdated ? "mac_outdated" : reply && reply.ok ? null : (reply && reply.error) || "bad_reply",
@@ -406,15 +408,19 @@ async function judgeVideo(key) {
     let rule = req.local ?? null, by = "words";
     if (req.payload) {
       const r = await callRelay("/judge", req.payload);
-      if (r.ok && r.data.judged === true) {
+      if (req.exam && r.ok && typeof r.data.forExam === "boolean") {
+        // In exam mode: about the exam's subject or not (the relay's forExam).
+        rule = r.data.forExam ? "exam" : null;
+        by = "claude";
+      } else if (!req.exam && r.ok && r.data.judged === true) {
         rule = r.data.rule;
         by = "claude";
       } else {
         rule = req.fallback; // the relay could not judge: the words decide
       }
     }
-    await update((s) => ({ state: engine.recordJudgment(s, key, rule, by, Date.now()) }));
-    sendLater({ type: "judged", key, rule, by });
+    await update((s) => ({ state: engine.recordJudgment(s, key, rule, by, Date.now(), { exam: !!req.exam }) }));
+    sendLater({ type: "judged", key, rule, by, exam: !!req.exam });
     tick(); // a video that is now closed goes to the gate at once
   } finally {
     judgingNow.delete(key);
@@ -513,7 +519,7 @@ const handlers = {
     const preview = r.ok ? engine.chatPreview(await load(), r.data, Date.now()) : null;
     if (!r.ok || preview.error) {
       const failed = r.ok ? preview.error : r.error || "unreachable";
-      await update((s) => ({ state: engine.addTurn(s, "gatekeeper", failed === "daily_limit" ? "That's enough changes by talking for today." : "Can't reach Claude right now. Your rules page still works.", Date.now()) }));
+      await update((s) => ({ state: engine.addTurn(s, "gatekeeper", failed === "daily_limit" ? "That's enough changes by talking for today." : "Gatekeeper can't be reached right now. Your rules page still works.", Date.now()) }));
       return { failed };
     }
     await update((s) => ({ state: engine.recordChatAnswer(s, r.data, preview, Date.now()) }));
@@ -551,6 +557,11 @@ const handlers = {
     if (out.refused) return { refused: out.refused };
     if (out.url) await readCalendar(true);
     const c = state.calendar;
+    // The first read decides: a link that isn't a feed is not kept, and the page says what is needed.
+    if (c && ["not_ical", "sign_in"].includes(c.error)) {
+      await update((s) => engine.setCalendar(s, null));
+      return { refused: c.error };
+    }
     return { ok: true, events: c ? c.events.length : 0, error: c && c.error };
   },
   async dismissOffer({ offer }) {
@@ -650,11 +661,17 @@ const handlers = {
     const r = await sync();
     return { ok: !!r };
   },
+  // The welcome tab says which step it is on, so a reload of the extension (turning on private windows does one)
+  // can bring it back there (tester run, #3).
+  async welcomeStep({ step }, sender) {
+    await chrome.storage.local.set({ welcome: { step, tabId: sender && sender.tab ? sender.tab.id : null, at: Date.now() } });
+    return { ok: true };
+  },
   async mac() {
     await macSync(true);
     // As macError: a reply with "error" would read to the page's ask() as the worker failing.
     const { error, ...rest } = macStatus;
-    return { ...rest, macError: error, permitted: await chrome.permissions.contains(NATIVE) };
+    return { ...rest, macError: error, permitted: await chrome.permissions.contains(NATIVE), seen: !!(await chrome.storage.local.get("macSeen")).macSeen };
   },
   async watch({ goal }) {
     await update((s) => ({ state: engine.startWatch(s, { goal }, Date.now()) }));
@@ -692,9 +709,24 @@ const handlers = {
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (sender.id !== chrome.runtime.id || !handlers[msg && msg.type]) return;
-  handlers[msg.type](msg).then(reply, (e) => reply({ error: String(e) }));
+  handlers[msg.type](msg, sender).then(reply, (e) => reply({ error: String(e) }));
   return true;
 });
+
+// The welcome tab closing is noted. A worker that starts within a few seconds of it is the extension reloading (turning
+// on private windows does that), so it reopens the welcome at its step; a tab the user closed stays closed.
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const { welcome } = await chrome.storage.local.get("welcome");
+  if (welcome && welcome.tabId === tabId) await chrome.storage.local.set({ welcome: { ...welcome, closedAt: Date.now() } });
+});
+(async () => {
+  const { welcome } = await chrome.storage.local.get("welcome");
+  if (!welcome || welcome.step === "finished" || Date.now() - welcome.at > 30 * 60e3) return;
+  if (welcome.closedAt && Date.now() - welcome.closedAt > 10e3) return; // closed by the user, a while ago
+  if (welcome.tabId !== null && (await chrome.tabs.get(welcome.tabId).catch(() => null))) return;
+  const open = (await chrome.tabs.query({ url: chrome.runtime.getURL("pages/welcome.html") + "*" }).catch(() => [])).length;
+  if (!open) chrome.tabs.create({ url: chrome.runtime.getURL("pages/welcome.html" + (welcome.step === "done" ? "?step=done" : "")) });
+})();
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === "install") chrome.tabs.create({ url: chrome.runtime.getURL("pages/welcome.html") });
@@ -708,7 +740,11 @@ chrome.permissions.onRemoved.addListener(async () => {
   if (!(await chrome.permissions.contains(ALL_SITES))) update((s) => ({ state: engine.setSorting(s, false) }));
   else update((s) => ({ state: s }));
 });
-chrome.permissions.onAdded.addListener(() => update((s) => ({ state: s })));
+// Access to every site granted (when exam mode starts): with AI help on, sorting new sites comes with it.
+chrome.permissions.onAdded.addListener(async () => {
+  const all = await chrome.permissions.contains(ALL_SITES);
+  update((s) => ({ state: all && engine.consented(s, "help") && !s.sorting ? engine.setSorting(s, true) : s }));
+});
 
 chrome.tabs.onActivated.addListener(tick);
 chrome.windows.onFocusChanged.addListener(tick);

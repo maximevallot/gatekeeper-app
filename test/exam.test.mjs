@@ -24,9 +24,10 @@ test("exam.start closes every kind at once, watched or not, until the end time",
     assert.equal(d.reopensAt, WED);
   }
   // Everything but study (QA round 2, H4): a site not sorted yet is closed until it is; study opens; other stays closed.
-  assert.equal(decide(s, { url: "https://canvas.mit.edu/", now: MON }).verdict, "block");
-  assert.equal(decide(s, { url: "https://canvas.mit.edu/", now: MON }).unsorted, true);
-  assert.equal(decide(recordSort(s, "canvas.mit.edu", "study"), { url: "https://canvas.mit.edu/", now: MON }).verdict, "allow");
+  assert.equal(decide(s, { url: "https://studyhall.example/", now: MON }).verdict, "block");
+  assert.equal(decide(s, { url: "https://studyhall.example/", now: MON }).unsorted, true);
+  assert.equal(decide(recordSort(s, "studyhall.example", "study"), { url: "https://studyhall.example/", now: MON }).verdict, "allow");
+  assert.equal(decide(s, { url: "https://canvas.mit.edu/", now: MON }).verdict, "allow", "a university's site is study");
   assert.equal(decide(recordSort(s, "discord.com", "other"), { url: "https://discord.com/", now: MON }).verdict, "block");
   assert.equal(decide(recordSort(s, "mail.google.com", "work"), { url: "https://mail.google.com/", now: MON }).verdict, "block");
   assert.ok(closedDomains(s, MON).includes("youtube.com"), "Video is not watched, and is still closed");

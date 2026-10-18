@@ -127,12 +127,16 @@ test("#4 (chat N1): after a no, the chat tells the relay loosening is locked, an
   let s = setUp({ games: 15 });
   s = proposeRules(s, { ...s.rules, kinds: { games: { minutes: 30 } } }, SAT).state;
   s = applyLoosenAnswer(s, { answer: { decision: "deny", reply: "The rule stays." }, message: "more", now: SAT }).state;
-  assert.equal(chatRequest(s, { message: "give games 30 min", now: SAT }).payload.loosenLocked, true);
-  assert.equal(chatRequest(setUp({ games: 15 }), { message: "hi", now: SAT }).payload.loosenLocked, false);
-  const answer = { reply: "I said no to a loosening today, so Games 30 waits: ask again after 4:00.", question: null, diff: [] };
+  // Since 2026-10-18 a no holds only its own rule, so the relay is never told everything is locked; the thread says
+  // which rule is held instead of the generic line.
+  assert.equal(chatRequest(s, { message: "give games 30 min", now: SAT }).payload.loosenLocked, false);
+  const answer = { reply: "Games: 30 minutes a day.", question: null, diff: [{ op: "budget", kind: "games", minutes: 30 }] };
   const p = chatPreview(s, answer, SAT);
+  assert.equal(p.refused, "asked_today");
   const after = recordChatAnswer(s, answer, p, SAT);
-  assert.deepEqual(after.thread.turns.slice(-1).map((x) => x.text), [answer.reply], "only the relay's words");
+  const last = after.thread.turns.at(-1).text;
+  assert.match(last, /I said no to loosening Games today/);
+  assert.ok(!after.thread.turns.some((x) => x.text === "That changes nothing in your rules."));
 });
 
 test("#3 (chat N2): Apply on \"end exam mode\" says what can happen without a calendar", () => {
@@ -153,4 +157,90 @@ test("#3: exam mode started from the chat keeps the exam's own time the relay se
   assert.equal(examAt(rollover(on, THU9 - 3600e3)), null, "not before");
   const none = chatPreview(s, { reply: "ok", diff: [{ op: "examStart", until: THU12, at: null }] }, SAT);
   assert.equal(proposeRules(s, none.rules, SAT).state.rules.exam.at, THU12, "without it, the exam's time is the end");
+});
+
+test("tester run, #1: exam mode never strands a student from study: search pages, study sites, and a study site asked for opens at once", async () => {
+  const { applyDiff } = await import("../extension/engine/videos.js");
+  let s = startExam(setUp({ video: 20 }), { until: SAT + 2 * 86400e3, goal: "15.425 midterm" }, SAT).state;
+  for (const u of ["https://search.brave.com/search?q=mit+canvas", "https://www.google.com/search?q=mit+canvas", "https://www.bing.com/search?q=x",
+    "https://duckduckgo.com/?q=x", "https://www.ecosia.org/search?q=x", "https://kagi.com/search?q=x",
+    "https://canvas.mit.edu/courses/1", "https://mit.instructure.com/", "https://www.gradescope.com/", "https://piazza.com/class/x",
+    "https://edstem.org/us/courses/1", "https://www.overleaf.com/project", "https://docs.google.com/document/d/1", "https://drive.google.com/",
+    "https://scholar.google.com/", "https://web.mit.edu/", "https://www.ox.ac.uk/"]) {
+    assert.equal(decide(s, { url: u, now: SAT + 60e3 }).verdict, "allow", u);
+  }
+  assert.equal(decide(s, { url: "https://www.google.com/maps", now: SAT }).verdict, "block", "Google beyond search stays closed");
+  assert.equal(decide(s, { url: "https://www.youtube.com/", now: SAT }).verdict, "block");
+  // An earlier no about Video's minutes doesn't hold anything else.
+  s = proposeRules(s, { ...s.rules, kinds: { video: { minutes: 40 } } }, SAT).state;
+  s = applyLoosenAnswer(s, { answer: { decision: "deny", reply: "No." }, message: "more video", now: SAT }).state;
+  // "I need studyhall.example for studying": the chat names it as study; the agent says yes; it opens at once.
+  const want = applyDiff(s.rules, [{ op: "study", domain: "studyhall.example" }]).rules;
+  const r = proposeRules(s, want, SAT + 120e3);
+  assert.equal(r.needsOk, true, "not refused because of the earlier no");
+  assert.equal(decide(r.state, { url: "https://studyhall.example/", now: SAT + 120e3 }).verdict, "block", "not before the agent's yes");
+  const y = applyLoosenAnswer(r.state, { answer: { decision: "allow", reply: "Open it." }, message: "my course notes are there", now: SAT + 130e3 }).state;
+  assert.equal(decide(y, { url: "https://studyhall.example/notes", now: SAT + 130e3 }).verdict, "allow", "it opens now");
+  assert.ok(examOn(y));
+});
+
+test("tester run, #2: a rule set during the watch week ends the week, so \"It applies now\" is true", async () => {
+  const { startWatch, watching, todaySummary } = await import("../extension/engine/engine.js");
+  let s = startWatch(setUp({}, false), { goal: "x" }, SAT);
+  assert.ok(watching(s));
+  const r = proposeRules(s, { ...s.rules, kinds: { video: { minutes: 20 } } }, SAT + 60e3);
+  assert.ok(!watching(r.state), "the watch week ended");
+  assert.deepEqual(r.now.map((c) => c.text), ["Video: 20 min a day"]);
+  assert.deepEqual(todaySummary(r.state, SAT + 60e3).kinds.map((k) => k.kind), ["video"], "Video shows on Today at once");
+});
+
+test("tester run, #7: 15 → 10 → \"actually no, 20\" within ten minutes: back up to 15 at once, the rest asks the agent", async () => {
+  const s = setUp({ video: 15 });
+  const down = proposeRules(s, { ...s.rules, kinds: { video: { minutes: 10 } } }, SAT, { undoable: true }).state;
+  assert.equal(down.rules.kinds.video.minutes, 10);
+  const up = proposeRules(down, { ...down.rules, kinds: { video: { minutes: 20 } } }, SAT + 8 * 60e3, { undoable: true });
+  assert.equal(up.state.rules.kinds.video.minutes, 15, "back to 15 at once");
+  assert.equal(up.needsOk, true, "15 → 20 is a loosening for the agent");
+  const late = proposeRules(down, { ...down.rules, kinds: { video: { minutes: 15 } } }, SAT + 11 * 60e3, { undoable: true });
+  assert.equal(late.state.rules.kinds.video.minutes, 10, "after ten minutes, a loosening like any other");
+  // The same from the chat: the card and Apply both know the way back.
+  const ans = { reply: "Video: 20 minutes a day.", diff: [{ op: "budget", kind: "video", minutes: 20 }] };
+  const p = chatPreview(down, ans, SAT + 60e3);
+  assert.deepEqual(p.now.map((c) => c.text), ["Video: 10 min a day → 15 min a day"]);
+  const rec = recordChatAnswer(down, ans, p, SAT + 60e3);
+  const ap = applyCard(rec, SAT + 61e3);
+  assert.equal(ap.state.rules.kinds.video.minutes, 15);
+});
+
+test("tester case, 1 and 3: in exam mode a stats video plays for the whole video, with no talk; others stay closed", async () => {
+  const { judgeRequest, recordJudgment, needsJudgment, enforcement, goalWords } = await import("../extension/engine/engine.js");
+  let s = startExam(setUp({ video: 20 }), { until: SAT + 2 * 86400e3, goal: "Stats exam" }, SAT).state;
+  const STATS = "https://www.youtube.com/watch?v=STATSvid001", CATS = "https://www.youtube.com/watch?v=CATSvid0001";
+  assert.deepEqual(goalWords("Stats exam"), ["stats"]);
+  assert.equal(needsJudgment(s, STATS), true, "each watch page is judged once in exam mode");
+  assert.equal(needsJudgment(s, "https://www.youtube.com/shorts/STATSvid001"), false, "not Shorts");
+  assert.equal(needsJudgment(s, "https://www.youtube.com/"), false, "not the home feed");
+  // With AI help: one rule, the exam's goal, through /judge.
+  const req = judgeRequest(s, "yt:STATSvid001", { title: "Linear regression, clearly explained", channel: "StatQuest" });
+  assert.equal(req.exam, true);
+  assert.deepEqual(req.payload.exam.goal, "Stats exam", "the relay's /judge reads exam and answers forExam");
+  assert.deepEqual(req.payload.rules, [], "the student's own video rules, none here");
+  s = recordJudgment(s, "yt:STATSvid001", "exam", "claude", SAT + 60e3, { exam: true });
+  s = recordJudgment(s, "yt:CATSvid0001", null, "claude", SAT + 60e3, { exam: true });
+  assert.equal(decide(s, { url: STATS, now: SAT + 61e3 }).verdict, "allow", "on topic: it plays");
+  assert.equal(decide(s, { url: CATS, now: SAT + 61e3 }).verdict, "block", "off topic: closed as before");
+  assert.equal(decide(s, { url: "https://www.youtube.com/", now: SAT + 61e3 }).verdict, "block", "the home feed stays closed");
+  assert.ok(enforcement(s, SAT + 61e3).allowVideos.includes("yt:STATSvid001"), "loaded directly, before the page closes");
+  // The whole video: an hour on it later, still open, and no pass was used.
+  for (let i = 1; i <= 720; i++) s = tick(s, { url: STATS, focused: true, active: true, seconds: 5, now: SAT + 61e3 + i * 5000 }).state;
+  assert.equal(decide(s, { url: STATS, now: SAT + 3700e3 }).verdict, "allow");
+  assert.deepEqual(s.usage.passes, {});
+  // Without AI help: the goal's words against the title, on this device.
+  const off = startExam(setUp({ video: 20 }, false), { until: SAT + 86400e3, goal: "stats exam" }, SAT).state;
+  assert.equal(judgeRequest(off, "yt:x", { title: "Stats 110: Lecture 1", channel: "Harvard" }).local, "exam");
+  assert.equal(judgeRequest(off, "yt:y", { title: "Minecraft speedrun", channel: "x" }).local, null);
+  // Only while exam mode is on.
+  const after = rollover(s, SAT + 3 * 86400e3);
+  assert.equal(examOn(after), false);
+  assert.equal(decide(after, { url: STATS, now: SAT + 3 * 86400e3 }).studyVideo, undefined);
 });

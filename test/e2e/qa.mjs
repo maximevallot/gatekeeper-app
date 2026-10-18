@@ -47,6 +47,8 @@ try {
   // Welcome: video 15 minutes, Claude off.
   const p = await connect((t) => t.type === "page" && t.url.endsWith("/pages/welcome.html"));
   await sleep(800);
+  check("tester #2: the welcome starts with rules; watching first is the small second choice",
+    !(await p.evaluate(`document.getElementById('ask').classList.contains('hidden')`)) && (await p.evaluate(`document.getElementById('watch').classList.contains('hidden')`)) && !!(await p.evaluate(`document.getElementById('watch-first')`)));
   await p.evaluate(`document.querySelector('.kind[data-kind=video]').click()`);
   await sleep(300);
   await p.evaluate(`document.getElementById('start').click()`);
@@ -65,6 +67,7 @@ try {
   await p.send("Page.navigate", { url: base + "/pages/rules.html" }); await sleep(1200);
   const blindText = await p.evaluate(`(document.getElementById('blind-warning') || {}).textContent || ''`);
   check("C2: the rules page says access to youtube.com was turned off", /youtube\.com/.test(blindText), blindText);
+  check("tester #5: no Mac app has connected, so the rules page doesn't show its switch", await p.evaluate(`document.getElementById('mac-row').classList.contains('hidden')`));
   check("H5: the rules page's settings say private windows are not covered, with the toggle", /Not covered/.test(await p.evaluate(`document.getElementById('private-pill').textContent`)) && /Allow in Private/.test(await p.evaluate(`document.getElementById('private-sub').textContent`)));
   check("C2: the badge flags it", (await sw.evaluate(`chrome.action.getBadgeText({})`)) === "!");
 
@@ -112,9 +115,22 @@ try {
   check("nytimes.com goes to its own gate", (await p.evaluate("location.href")).includes("/pages/gate.html#https://www.nytimes.com/"), await p.evaluate("location.href"));
   check("the gate says its own limit closes it", /its own limit/.test(await p.evaluate(`document.getElementById('site').textContent`)) && /Closed all day/.test(await p.evaluate(`document.getElementById('headline').textContent`)));
 
+  // Tester run: with AI help off, the chat asks first and, on "Not now", says plainly it needs AI help; nothing is sent.
+  await p.send("Page.navigate", { url: base + "/pages/talk.html" }); await sleep(1000);
+  await p.evaluate(`document.getElementById('chat-message').value = 'less social media'; document.getElementById('chat-form').requestSubmit();`); await sleep(600);
+  const asked = !(await p.evaluate(`document.getElementById('chat-consent').classList.contains('hidden')`));
+  await p.evaluate(`document.getElementById('chat-no').click()`); await sleep(500);
+  const turns = await sw.evaluate(`chrome.storage.local.get('state').then(r => (r.state.thread.turns || []).length)`);
+  check("tester: with AI help off the chat asks, then says plainly it needs AI help, and nothing is sent",
+    asked && /needs AI help/.test(await p.evaluate(`(document.getElementById('chat-needs-help') || {}).textContent || ''`)) && turns === 0, { asked, turns });
+  await p.send("Page.navigate", { url: base + "/pages/rules.html" }); await sleep(1000);
+  check("tester #8: the calendar field says which link stays up to date", /Calendar Feed/.test(await p.evaluate(`document.getElementById('calendar-hint').textContent`)));
+
   // Start exam mode from Today (one-model plan, gap 2): it applies at once, and the rules page shows it.
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(800);
   await p.evaluate(`document.getElementById('exam-start').click()`); await sleep(300);
+  check("tester #4: before the browser's all-sites prompt, one plain line says why, and that only site names are read",
+    /only site names, never page content/.test(await p.evaluate(`(document.getElementById('exam-access-line') || {}).textContent || ''`)));
   const until = Date.now() + 2 * 86400e3;
   await p.evaluate(`(() => { const d = new Date(${until}), z = (n) => String(n).padStart(2, '0');
     document.getElementById('exam-until').value = d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + 'T' + z(d.getHours()) + ':' + z(d.getMinutes());
@@ -128,6 +144,26 @@ try {
   // QA round 3 #5: without access to every site (this build doesn't hold it), Today says sites it doesn't know stay open.
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(1000);
   check("QA round 3 #5: exam mode without every site says unknown sites stay open, with a way to close them", /stay open in this exam mode/.test(await p.evaluate(`(document.getElementById('exam-open-today') || {}).textContent || ''`)));
+
+  // Tester run, #3: turning on private windows reloads the extension and closes the welcome tab; it comes back at the
+  // done screen. Here the welcome is reopened at its done step, then the extension reloads as that switch makes it.
+  await p.send("Page.navigate", { url: base + "/pages/welcome.html?step=done" }); await sleep(1500);
+  // What that reload does, in steps: the welcome tab closes and the worker stops. (Headless Brave disables an extension
+  // loaded from the command line when the real switch is flipped, so the switch itself can't be used here.)
+  const welcomeTab = (await targets()).find((t) => t.type === "page" && t.url.includes("/pages/welcome.html?step=done"));
+  await p.send("Target.closeTarget", { targetId: welcomeTab.id });
+  await sleep(500);
+  const swT = (await targets()).find((t) => t.type === "service_worker");
+  const browserWs = (await (await fetch(`http://127.0.0.1:${process.env.CDP_PORT || 9334}/json/version`)).json()).webSocketDebuggerUrl;
+  await new Promise((res) => { const ws = new WebSocket(browserWs); ws.onopen = () => { ws.send(JSON.stringify({ id: 1, method: "Target.closeTarget", params: { targetId: swT.id } })); setTimeout(() => { ws.close(); res(); }, 800); }; });
+  // Chrome brings another tab to the front; that switch wakes Gatekeeper's worker.
+  const blank = (await targets()).find((t) => t.type === "page" && t.url === "about:blank");
+  const ctl = await connect((t) => t.id === blank.id);
+  await ctl.send("Target.createTarget", { url: "about:blank" });
+  await sleep(3000);
+  const back = await connect((t) => t.type === "page" && t.url.includes("/pages/welcome.html?step=done"));
+  await sleep(1200);
+  check("tester #3: after the reload, the welcome comes back at the done screen", !(await back.evaluate(`document.getElementById('done').classList.contains('hidden')`)) && /You're set/.test(await back.evaluate(`document.getElementById('done-title').textContent`)));
 } catch (e) {
   console.log("FAIL", e.message); failures++;
 }

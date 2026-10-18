@@ -82,7 +82,7 @@ test("step 2: \"use this device's rules instead\" is a rule change: tighter part
   assert.equal(j.state.rules.kinds.games.minutes, 0, "Games closed applies now");
   assert.equal(j.state.rules.kinds.social.minutes, 20, "no longer watching Social is a loosening: still 20");
   assert.equal(j.needsOk, true);
-  assert.deepEqual(j.state.loosen.changes, ["Social media: no longer watched"]);
+  assert.deepEqual(j.state.loosen.changes, ["Social media: limit removed"]);
 });
 
 test("step 2: the joining device's passes and waiting loosening are dropped; the account's are kept", () => {

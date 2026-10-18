@@ -190,6 +190,7 @@ export function examForm(done, source = "extension") {
   const go = el("button", { class: "btn", type: "submit", id: "exam-go" }, "Start");
   const form = el("form", { class: "section", id: "exam-start-form", style: "gap: 8px" },
     el("div", { class: "small muted" }, "Everything but study sites closes until then. Ending it early asks Gatekeeper."),
+    el("div", { class: "small muted", id: "exam-access-line" }, EVERY_SITE_LINE),
     until, goal, go);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -207,6 +208,9 @@ export function examForm(done, source = "extension") {
  * that closes them before they load. Closing every tab whose address can't be read instead would also close the
  * course pages and documents a student needs. Starting goes ahead either way; Today says what stays open.
  */
+/** Said just before the browser's prompt, which reads "Read and change all your data on all websites". */
+export const EVERY_SITE_LINE = "Your browser will ask to let Gatekeeper see all sites. It needs that to close sites it doesn't know during exam mode, and to notice new distracting sites. It reads only site names, never page content.";
+
 export async function askEverySite() {
   const all = { origins: ["*://*/*"] };
   if (await chrome.permissions.contains(all).catch(() => false)) return true;

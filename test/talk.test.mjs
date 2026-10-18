@@ -74,9 +74,15 @@ test("H4: one follow-up is kept by the engine, not the page", () => {
   const ask = { decision: "ask", minutes: 0, reply: "Which class?" };
   const first = applyGateAnswer(s, { url: YT, answer: ask, now: NOW });
   assert.equal(first.result.decision, "ask");
+  // The answer carries the gate's own question, so the relay decides (tester case, 2026-10-18).
+  assert.equal(gateRequest(first.state, { url: YT, message: "econometrics", now: NOW + 10e3 }).payload.asked, "Which class?");
+  assert.equal(gateRequest(s, { url: YT, message: "hello", now: NOW }).payload.asked, undefined, "a first message has none");
+  // A second question anyway is shown, never a silent no; a third is a no, whatever the page says.
   const second = applyGateAnswer(first.state, { url: YT, answer: ask, now: NOW + 30e3 });
-  assert.equal(second.result.decision, "deny", "a second question is a no, whatever the page says");
-  assert.equal(second.state.cooldowns.video, NOW + 30e3 + COOLDOWN_MS);
+  assert.equal(second.result.decision, "ask");
+  const third = applyGateAnswer(second.state, { url: YT, answer: ask, now: NOW + 40e3 });
+  assert.equal(third.result.decision, "deny");
+  assert.equal(third.state.cooldowns.video, NOW + 40e3 + COOLDOWN_MS);
   const no = applyGateAnswer(s, { url: YT, answer: { decision: "deny", minutes: 0, reply: "No." }, now: NOW });
   assert.equal(gateRequest(no.state, { url: YT, message: "please", now: NOW + 60e3 }).refused, "cooldown");
   assert.ok(gateRequest(no.state, { url: YT, message: "please", now: NOW + COOLDOWN_MS + 1 }).payload);

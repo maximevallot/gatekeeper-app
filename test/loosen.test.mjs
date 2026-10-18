@@ -98,14 +98,16 @@ test("turning Claude help off is itself a loosening: until the morning, a loosen
   assert.equal(more(waiting).refused, "help_off_today");
 });
 
-test("after a no, no loosening of the rules is asked until the morning: not one minute more (QA round 2, H3)", () => {
+test("after a no, that rule is held until the morning, not one minute more; other rules can still be asked (2026-10-18)", () => {
   const r = more(setUp());
   const n = applyLoosenAnswer(r.state, { answer: no, message: "I just want more", now: MON }).state;
   const again = proposeRules(n, { ...n.rules, kinds: { ...n.rules.kinds, video: { minutes: 44 } } }, MON);
-  assert.equal(again.refused, "asked_today");
+  assert.equal(again.refused, "asked_today", "Video, one minute less than asked: still no");
   assert.equal(again.state.loosen, null);
   const other = proposeRules(n, { ...n.rules, kinds: { ...n.rules.kinds, social: { minutes: 30 } } }, MON);
-  assert.equal(other.refused, "asked_today", "nor another rule");
+  assert.equal(other.needsOk, true, "Social can be asked: a different rule");
+  const mixed = proposeRules(n, { ...n.rules, kinds: { video: { minutes: 50 }, social: { minutes: 30 } } }, MON);
+  assert.deepEqual(mixed.state.loosen.changes, ["Social media: 15 min a day → 30 min a day"], "only the part not refused is asked");
   assert.equal(proposeRules(n, { ...n.rules, kinds: { ...n.rules.kinds, social: { minutes: 5 } } }, MON).now.length, 1, "tightening still applies");
   assert.equal(more(rollover(n, TUE)).needsOk, true, "tomorrow it can be asked again");
 });

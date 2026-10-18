@@ -26,7 +26,7 @@
       <button class="btn" type="submit" id="loosen-send">Ask</button>
     </form>
     <button class="link" type="button" id="loosen-drop" style="align-self: flex-start">Drop this change</button>
-    <div class="small muted">A yes applies tomorrow morning. Your reason and the change are sent to Claude.</div>
+    <div class="small muted">A yes applies tomorrow morning. Your reason and the change are sent to Gatekeeper's AI.</div>
   </div>
 
   <div class="card rowblock hidden" id="exam-row">
@@ -58,10 +58,10 @@
       <div class="rowblock">
         <div class="row" style="padding: 0">
           <div class="stack">
-            <div class="name">Claude help</div>
+            <div class="name">AI help</div>
             <div class="sub" id="help-sub">Gate answers, rule changes by talking, sorting new sites.</div>
           </div>
-          <label class="switch"><input type="checkbox" id="help" aria-label="Claude help"><span></span></label>
+          <label class="switch"><input type="checkbox" id="help" aria-label="AI help"><span></span></label>
         </div>
         <div id="help-sent"></div>
       </div>
@@ -85,6 +85,7 @@
           <input class="field" id="calendar-url" placeholder="Paste a calendar link (Canvas: Calendar → Calendar Feed)" autocomplete="off" aria-label="Calendar link">
           <button class="btn" type="submit">Connect</button>
         </form>
+        <div class="small muted" id="calendar-hint">Use a calendar feed link, so it stays up to date: in Canvas, Calendar › Calendar Feed; in Google Calendar, the secret address in iCal format; in Apple's iCloud Calendar, a public calendar's link.</div>
       </div>
       <div class="row" id="mac-row">
         <div class="stack"><div class="name">Mac app</div><div class="sub" id="mac-sub"></div></div>

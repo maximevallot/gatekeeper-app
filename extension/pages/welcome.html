@@ -20,10 +20,10 @@
     <div class="small muted hidden" id="join-error"></div>
   </div>
 
-  <div id="watch" style="display: flex; flex-direction: column; gap: 32px">
+    <div id="watch" class="hidden" style="display: flex; flex-direction: column; gap: 32px">
     <div class="section" style="gap: 8px">
       <div class="eyebrow">Gatekeeper</div>
-      <h1 class="title">First, a week of just watching</h1>
+      <h1 class="title">First, a week to see where your time goes</h1>
       <p class="lead">For 7 days Gatekeeper counts your time on social media, video, games, news and shopping, and blocks nothing. Then you see your week and set limits from it.</p>
     </div>
     <div class="section" style="gap: 12px">
@@ -32,12 +32,12 @@
     </div>
     <p class="small muted account-line"></p>
     <div class="row" style="padding: 0">
-      <button class="link" type="button" id="skip-watch">Skip: set limits now</button>
-      <button class="btn" type="button" id="start-watch">Start watching</button>
+      <button class="link" type="button" id="skip-watch">Set limits now instead</button>
+      <button class="btn" type="button" id="start-watch">Start</button>
     </div>
   </div>
 
-  <div id="ask" class="hidden" style="display: flex; flex-direction: column; gap: 32px">
+  <div id="ask" style="display: flex; flex-direction: column; gap: 32px">
     <div class="section" style="gap: 8px">
       <div class="eyebrow">Gatekeeper</div>
       <h1 class="title" id="ask-title">Set it up in a minute</h1>
@@ -66,14 +66,14 @@
     <div class="card" style="padding: 16px; display: flex; gap: 14px; align-items: flex-start">
       <input id="help" type="checkbox" style="width: 22px; height: 22px; margin: 2px 0 0; flex: none">
       <div class="stack" style="gap: 6px">
-        <label for="help" style="font-size: 16px; font-weight: 600">Let Claude help</label>
+        <label for="help" style="font-size: 16px; font-weight: 600">Turn on AI help</label>
         <span class="small muted" id="help-line">Ask the gate for a few minutes, change rules by talking, sort new sites. Only what each needs is sent, never your browsing.</span>
       </div>
     </div>
 
     <p class="small muted account-line"></p>
     <div class="row" style="padding: 0">
-      <span class="small muted">Next: private windows (one switch).</span>
+      <button class="link small" type="button" id="watch-first">See my week first, set limits after</button>
       <button class="btn" id="start" disabled>Start</button>
     </div>
   </div>

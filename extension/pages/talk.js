@@ -1,7 +1,7 @@
 // Change something: the one thread with Gatekeeper. The engine keeps it (state.thread), so the popup, this tab
 // and the tab the Mac opens all show the same talk and update together. A change comes as a card; nothing
 // changes until Apply, and Apply checks the card again against the rules as they are then.
-import { ask, el, clock, lockIcon, clockIcon, whatsSent, checkWorker, askEverySite } from "./common.js";
+import { ask, el, clock, lockIcon, clockIcon, whatsSent, checkWorker, askEverySite, EVERY_SITE_LINE } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 const inTab = new URLSearchParams(location.search).get("from") === "rules" || window.innerWidth > 520;
@@ -42,6 +42,7 @@ function cardView(c) {
     rows.push(note);
   }
   if (v.skipped) rows.push(el("div", { class: "small muted" }, `${v.skipped} part${v.skipped === 1 ? "" : "s"} of the answer couldn't be used.`));
+  if ((c.answer.diff || []).some((op) => op && op.op === "examStart")) rows.push(el("div", { class: "small muted" }, EVERY_SITE_LINE));
   const apply = el("button", { class: "btn", type: "button", id: "apply" }, "Apply");
   const not = el("button", { class: "btn ghost", type: "button", id: "not-this" }, "Not this");
   apply.addEventListener("click", async () => {
@@ -147,8 +148,7 @@ async function send(text) {
 }
 
 $("chat-yes").addEventListener("click", async () => {
-  // Sorting new sites comes with Claude help where the browser lets Gatekeeper see every site; it asks here.
-  await chrome.permissions.request({ origins: ["*://*/*"] }).catch(() => false);
+  // Access to every site is asked only when exam mode starts (tester run, #4), not with this yes.
   const r = await ask("consent", { help: true }).catch(() => null);
   $("chat-consent").classList.add("hidden");
   $("chat-form").classList.remove("hidden");
@@ -159,6 +159,10 @@ $("chat-yes").addEventListener("click", async () => {
 $("chat-no").addEventListener("click", () => {
   $("chat-consent").classList.add("hidden");
   $("chat-form").classList.remove("hidden");
+  // Said plainly: changing rules by talking needs AI help; nothing was sent (tester run).
+  if (!document.getElementById("chat-needs-help")) {
+    $("chat-log").append(el("div", { class: "small muted", id: "chat-needs-help", style: "align-self: center" }, "Changing rules by talking needs AI help. Nothing was sent. Your rules page works without it."));
+  }
 });
 
 $("forget").addEventListener("click", async () => { await ask("forgetThread"); await load(); });
