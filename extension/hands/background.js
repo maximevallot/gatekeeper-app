@@ -111,6 +111,8 @@ function keepSpan(span) {
   if (same) last.to = span.to;
   else outbox.spans.push({ seq: ++outbox.seq, from: span.from, to: span.to, buckets: span.buckets });
   if (outbox.spans.length > MAX_SPANS) outbox.spans = outbox.spans.slice(-MAX_SPANS);
+  // Saved at least every 10 seconds, so a worker the browser stops loses at most that much counted time.
+  if (Date.now() - (keepSpan.saved || 0) > 10e3) { keepSpan.saved = Date.now(); saveAccount(); }
 }
 
 /** A request the user made here: applied to the copy already, and sent at the next sync (soon). */
