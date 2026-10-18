@@ -1,9 +1,10 @@
-// Change something: the rules chat. Claude proposes a change as a card; nothing changes until Apply, and
-// Apply goes through proposeRules, so a loosening is tagged "tomorrow" and waits for the morning.
+// Change something: the one thread with Gatekeeper. The engine keeps it (state.thread), so the popup, this tab
+// and the tab the Mac opens all show the same talk and update together. A change comes as a card; nothing
+// changes until Apply, and Apply checks the card again against the rules as they are then.
 import { ask, el, clock, lockIcon, clockIcon, whatsSent, checkWorker } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
-const inTab = new URLSearchParams(location.search).get("from") === "rules";
+const inTab = new URLSearchParams(location.search).get("from") === "rules" || window.innerWidth > 520;
 if (inTab) {
   document.body.classList.remove("popup");
   $("talk-main").className = "page narrow";
@@ -11,15 +12,66 @@ if (inTab) {
   $("back").href = "rules.html";
 }
 
-let history = []; // this conversation: { role: "user" | "gatekeeper", text }, kept only on this screen
-let helpOn = false;
-let card = null;
-let reasonFor = false; // after Apply with a loosening: the next message is the reason, for the agent
+let got = null; // the background's last state reply
+let busy = false;
 
-function say(text, me) {
-  const b = el("div", { class: "bubble" + (me ? " me" : "") }, text);
-  $("chat-log").append(b);
-  b.scrollIntoView({ block: "end" });
+const helpOn = () => {
+  const c = (got && got.consent) || {};
+  return !!(c.help && c.help.on) || !!(c.chat && c.chat.on);
+};
+
+function bubble(t) {
+  if (t.role === "note") return el("div", { class: "small muted", style: "align-self: center" }, t.text);
+  return el("div", { class: "bubble" + (t.role === "user" ? " me" : "") }, t.text);
+}
+
+function line(text, later, agent) {
+  return el("div", { class: "line" },
+    el("span", { class: "icon " + (later ? "later" : "now") }, later ? clockIcon(16) : lockIcon(16, "")),
+    el("span", {}, text),
+    el("span", { class: "tag " + (later ? "later" : "now") }, agent ? "asks you why" : later ? "tomorrow" : "now"));
+}
+
+function cardView(c) {
+  const v = c.view;
+  const rows = [...v.now.map((t) => line(t, false)), ...v.later.map((x) => line(x.text, true, x.agent))];
+  if (v.later.some((x) => !x.agent)) rows.push(el("div", { class: "small muted" }, `"Tomorrow" means ${clock(v.from)} tomorrow morning, once you've said why.`));
+  if (v.needsAccess.length) rows.push(el("div", { class: "small muted" }, `Your browser will ask to let Gatekeeper see ${v.needsAccess.join(", ")}.`));
+  if (v.skipped) rows.push(el("div", { class: "small muted" }, `${v.skipped} part${v.skipped === 1 ? "" : "s"} of the answer couldn't be used.`));
+  const apply = el("button", { class: "btn", type: "button", id: "apply" }, "Apply");
+  const not = el("button", { class: "btn ghost", type: "button", id: "not-this" }, "Not this");
+  apply.addEventListener("click", async () => {
+    // A site outside the catalog needs the browser's yes first, asked inside the click.
+    if (v.needsAccess.length && !(await chrome.permissions.request({ origins: v.needsAccess.map((d) => `*://*.${d}/*`) }).catch(() => false))) {
+      await ask("dropCard"); return;
+    }
+    await ask("applyCard").catch(() => null);
+  });
+  not.addEventListener("click", () => ask("dropCard"));
+  return el("div", { class: "change", id: "card" }, ...rows, el("div", { class: "actions" }, apply, not));
+}
+
+function render() {
+  const th = (got.state.thread) || { turns: [], card: null };
+  const items = th.turns.length ? th.turns.map(bubble)
+    : [el("div", { class: "bubble" }, "Say what to change, in your words. Anything that loosens a rule needs a reason, and then waits for the morning.")];
+  if (th.card) items.push(cardView(th.card));
+  $("chat-log").replaceChildren(...items);
+  $("chat-log").lastChild.scrollIntoView({ block: "end" });
+  // A loosening waiting for its reason: the next message is that reason, for the agent.
+  const reason = !!got.state.loosen;
+  $("chat-message").placeholder = reason ? "Your reason, in one go" : "Say it in your words";
+  $("suggest").classList.toggle("hidden", th.turns.length > 0 || reason);
+}
+
+let shown = "";
+async function load() {
+  got = await ask("state");
+  // The state changes every few seconds while time is counted; redraw only when the talk itself changed.
+  const key = JSON.stringify([got.state.thread, got.state.loosen, got.consent && got.consent.help]);
+  if (key === shown) return;
+  shown = key;
+  render();
 }
 
 $("consent-list").append(whatsSent());
@@ -31,12 +83,11 @@ $("suggest").addEventListener("click", (e) => {
   $("chat-form").requestSubmit();
 });
 
-$("chat-form").addEventListener("submit", (e) => {
+$("chat-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = $("chat-message").value.trim();
-  if (!text) return;
-  if (reasonFor) { sendReason(text); return; }
-  if (!helpOn) {
+  if (!text || busy) return;
+  if (!helpOn()) {
     // Nothing leaves the browser before this yes.
     $("chat-consent").classList.remove("hidden");
     $("chat-form").classList.add("hidden");
@@ -46,114 +97,37 @@ $("chat-form").addEventListener("submit", (e) => {
   send(text);
 });
 
+async function send(text) {
+  busy = true;
+  $("chat-message").value = "";
+  $("chat-send").disabled = $("chat-message").disabled = true;
+  if (got.state.loosen) await ask("loosen", { message: text }).catch(() => null);
+  else await ask("chat", { message: text }).catch(() => null);
+  busy = false;
+  $("chat-send").disabled = $("chat-message").disabled = false;
+  $("chat-message").focus();
+  await load();
+}
+
 $("chat-yes").addEventListener("click", async () => {
   // Sorting new sites comes with Claude help where the browser lets Gatekeeper see every site; it asks here.
   await chrome.permissions.request({ origins: ["*://*/*"] }).catch(() => false);
   const r = await ask("consent", { help: true }).catch(() => null);
   $("chat-consent").classList.add("hidden");
   $("chat-form").classList.remove("hidden");
-  helpOn = !!(r && r.help);
-  if (helpOn) send($("chat-message").value.trim());
-  else say("That wasn't saved, so nothing was sent.");
+  await load();
+  if (r && r.help) send($("chat-message").value.trim() || "");
 });
 
 $("chat-no").addEventListener("click", () => {
   $("chat-consent").classList.add("hidden");
   $("chat-form").classList.remove("hidden");
-  say("Then nothing is sent. Your rules page changes things by hand.");
 });
 
-async function send(text) {
-  if (!text) return;
-  say(text, true);
-  $("chat-message").value = "";
-  $("suggest").classList.add("hidden");
-  if (card) { card.remove(); card = null; }
-  $("chat-send").disabled = $("chat-message").disabled = true;
-  let r;
-  try { r = await ask("chat", { message: text, history }); } catch { r = { failed: "unreachable" }; }
-  $("chat-send").disabled = $("chat-message").disabled = false;
-  $("chat-message").focus();
-  history.push({ role: "user", text });
-  if (r.refused === "no_consent") { helpOn = false; $("chat-consent").classList.remove("hidden"); $("chat-form").classList.add("hidden"); return; }
-  if (r.failed) {
-    say(r.failed === "daily_limit" ? "That's enough changes by talking for today." : "Can't reach Claude right now. Your rules page still works.");
-    return;
-  }
-  const answer = r.question || r.reply;
-  if (answer) { say(answer); history.push({ role: "gatekeeper", text: answer }); }
-  if (!r.question) showCard(r);
-}
+$("forget").addEventListener("click", async () => { await ask("forgetThread"); await load(); });
 
-async function sendReason(text) {
-  say(text, true);
-  $("chat-message").value = "";
-  const r = await ask("loosen", { message: text }).catch(() => ({ decision: "unavailable" }));
-  if (r.decision === "ask") { say(r.reply); return; }
-  reasonFor = false;
-  $("chat-message").placeholder = "Say it in your words";
-  if (r.decision === "allow") say(r.now ? `${r.reply} It applies now.` : `${r.reply} It applies tomorrow at ${clock(r.from)}.`);
-  else if (r.decision === "deny") say(`${r.reply} You can ask again tomorrow.`);
-  else if (r.decision === "unavailable") say("I couldn't be reached, so it waits for the morning as usual.");
-  else say("Nothing was sent.");
-}
-
-function line(text, later, from, agent) {
-  return el("div", { class: "line" },
-    el("span", { class: "icon " + (later ? "later" : "now") }, later ? clockIcon(16) : lockIcon(16, "")),
-    el("span", {}, text),
-    el("span", { class: "tag " + (later ? "later" : "now") }, agent ? "asks you why" : later ? "tomorrow" : "now"));
-}
-
-function showCard(p) {
-  if (!p.now.length && !p.later.length) { say("That changes nothing in your rules."); return; }
-  const rows = [...p.now.map((c) => line(c.text, false)), ...p.later.map((c) => line(c.text, true, p.from, c.agent))];
-  if (p.later.length) rows.push(el("div", { class: "small muted" }, `"Tomorrow" means ${clock(p.from)} tomorrow morning. For a real need now, ask the gate.`));
-  if (p.needsAccess.length) rows.push(el("div", { class: "small muted" }, `Your browser will ask to let Gatekeeper see ${p.needsAccess.join(", ")}.`));
-  if (p.skipped) rows.push(el("div", { class: "small muted" }, `${p.skipped} part${p.skipped === 1 ? "" : "s"} of the answer couldn't be used.`));
-  const apply = el("button", { class: "btn", type: "button", id: "apply" }, "Apply");
-  const not = el("button", { class: "btn ghost", type: "button", id: "not-this" }, "Not this");
-  card = el("div", { class: "change", id: "card" }, ...rows, el("div", { class: "actions" }, apply, not));
-  $("chat-log").append(card);
-  card.scrollIntoView({ block: "end" });
-  not.addEventListener("click", () => { card.remove(); card = null; say("Nothing changed."); });
-  apply.addEventListener("click", async () => {
-    if (p.needsAccess.length) {
-      const granted = await chrome.permissions.request({ origins: p.needsAccess.map((d) => `*://*.${d}/*`) });
-      if (!granted) { say(`Gatekeeper needs access to ${p.needsAccess.join(", ")}. Nothing changed.`); card.remove(); card = null; return; }
-    }
-    const r = await ask("propose", { rules: p.rules });
-    card.remove(); card = null;
-    if (p.examEnd) {
-      // Ending exam mode early is the agent's call: ask for the reason, or say why nothing is asked.
-      const e = await ask("endExam").catch(() => ({ refused: "unreachable" }));
-      if (e.needsOk) {
-        say("To end exam mode early, tell me why. If the exam is over, it ends now; otherwise tomorrow morning.");
-        reasonFor = true;
-        $("chat-message").placeholder = "Your reason, in one go";
-        $("chat-message").focus();
-        return;
-      }
-      say({ ends_anyway: `Exam mode ends at ${clock(e.until)} anyway.`, help_off: `With Claude help off, exam mode runs to its end at ${clock(e.until)}.`,
-        asked_today: "I said no to ending it today. You can ask again tomorrow.", not_on: "Exam mode is already off." }[e.refused] || "Nothing changed.");
-      return;
-    }
-    if (r.refused === "asked_today") { say("I said no to that today. You can ask again tomorrow."); return; }
-    if (r.needsOk) {
-      say(`${r.now.length ? "The stricter part applies now. " : ""}To loosen the rest, tell me why: what changed?`);
-      reasonFor = true;
-      $("chat-message").placeholder = "Your reason, in one go";
-      $("chat-message").focus();
-      return;
-    }
-    say(r.later && r.later.length ? `Done. ${r.now.length ? "Some of it applies now; the rest " : "It "}applies tomorrow at ${clock(r.from)}.` : "Done. It applies now.");
-  });
-}
-
-async function load() {
-  const { consent = {} } = await ask("state");
-  helpOn = !!(consent.help && consent.help.on) || !!(consent.chat && consent.chat.on);
-}
+// Every view of the thread updates when the engine's state changes, whichever tab changed it.
+chrome.storage.onChanged.addListener((changes, area) => { if (area === "local" && changes.state && !busy) load(); });
 
 checkWorker();
 load();

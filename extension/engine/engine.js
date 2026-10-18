@@ -78,6 +78,7 @@ export function initialState() {
     judged: {}, // "yt:<id>" -> { rule, key, by, at }: which video rule a video falls under (rule null: none)
     judging: {}, // "yt:<id>" -> when it was asked: a judgment in flight
     history: [], // one summary per finished day, the last HISTORY_DAYS, on this device only
+    thread: { turns: [], card: null }, // the one conversation with Gatekeeper, kept on this device
   };
 }
 
@@ -753,6 +754,7 @@ export function applyGateAnswer(state, { url, answer, now }) {
       usage: { ...s.usage, passes: { ...s.usage.passes, [kind]: n + 1 } },
       cooldowns: { ...(s.cooldowns || {}), [kind]: t + minutes * 60e3 + AFTER_PASS_MS },
     };
+    s = addTurn(s, "note", `The gate gave ${minutes} min on ${e.domain}.`, t);
     return { state: s, result: { decision: "allow", minutes, site: e.domain, reply: answer.reply } };
   }
   if (answer.decision === "ask" && !((s.followUps || {})[kind] > t)) {
@@ -831,7 +833,9 @@ export function chatRequest(state, { message, history = [], now }) {
   const text = String(message || "").trim();
   if (!consented(s, "chat")) return { refused: "no_consent" };
   if (!text) return { refused: "empty" };
-  const turns = (Array.isArray(history) ? history : []).slice(-6)
+  // The last six turns of the one thread the engine keeps (history passed in is used only when there is none).
+  const kept = ((s.thread && s.thread.turns) || []).filter((h) => h.role !== "note");
+  const turns = (kept.length ? kept : Array.isArray(history) ? history : []).slice(-6)
     .filter((h) => h && (h.role === "user" || h.role === "gatekeeper") && typeof h.text === "string" && h.text.trim())
     .map((h) => ({ role: h.role, text: h.text.trim().slice(0, MAX_MESSAGE) }));
   return {
@@ -958,6 +962,8 @@ export function applyLoosenAnswer(state, { answer, message = "", now }) {
   const l = s.loosen;
   if (!ok || !l) return { state, result: { decision: "error" } };
   const log = (decision) => logLoosen(s, { kind: l.kind, changes: l.changes, message: String(message).slice(0, MAX_MESSAGE), decision, reply: answer.reply.slice(0, 280) });
+  if (message) s = addTurn(s, "user", message, now);
+  s = addTurn(s, "gatekeeper", answer.reply, now);
   if (answer.decision === "ask" && !l.asked) {
     return { state: { ...s, loosen: { ...l, asked: answer.reply.slice(0, 300) }, loosenLog: log("ask") }, result: { decision: "ask", reply: answer.reply } };
   }
@@ -980,6 +986,8 @@ export function loosenUnavailable(state, { message = "", error = "", now }) {
   if (!l) return { state };
   // Rules wait for the morning, as without an agent; exam mode runs to its set end, as with Claude help off.
   s = l.kind === "exam" ? s : { ...s, pending: s.pending ? { ...s.pending, ok: true } : null };
+  if (message) s = addTurn(s, "user", message, now);
+  s = addTurn(s, "note", l.kind === "exam" ? "Gatekeeper couldn't be reached, so exam mode runs to its end." : "Gatekeeper couldn't be reached, so the change waits for the morning as usual.", now);
   return { state: { ...s, loosen: null, loosenLog: logLoosen(s, { kind: l.kind, changes: l.changes, message: String(message).slice(0, MAX_MESSAGE), decision: "unavailable", reply: String(error).slice(0, 80) }) } };
 }
 
@@ -1014,4 +1022,72 @@ export function applyMacRequest(state, req, now) {
   if (!req || typeof req !== "object") return { state, refused: "bad_request" };
   if (req.type === "exam.start") return startExam(state, { until: req.until, goal: req.goal }, now);
   return { state, refused: "unknown_type" };
+}
+
+// ---------- the one thread ----------
+// One conversation with Gatekeeper, kept by the engine on this device: the popup, the Talk tab and the tab the
+// Mac app opens all show it. It holds the last MAX_TURNS turns and the open card (the change waiting for Apply).
+// Gate outcomes and the agent's answers on loosening show in it as lines.
+
+export const MAX_TURNS = 50;
+
+export function addTurn(state, role, text, now) {
+  const t = Math.max(Number(now) || 0, (state.clock && state.clock.floor) || 0);
+  const th = state.thread || { turns: [], card: null };
+  const turn = { role, text: String(text || "").slice(0, 600), at: t };
+  return { ...state, thread: { ...th, turns: [...(th.turns || []), turn].slice(-MAX_TURNS) } };
+}
+
+/** The relay's answer to a chat message: its reply (or question) as a turn, and a card if it changes anything. */
+export function recordChatAnswer(state, answer, preview, now) {
+  let s = addTurn(state, "gatekeeper", preview.question || preview.reply || "", now);
+  const changes = !preview.question && (preview.now.length || preview.later.length);
+  const card = changes ? {
+    answer: { reply: answer.reply || "", question: null, diff: Array.isArray(answer.diff) ? answer.diff.slice(0, 10) : [] },
+    view: { now: preview.now.map((c) => c.text), later: preview.later.map((c) => ({ text: c.text, agent: !!c.agent })), from: preview.from, needsAccess: preview.needsAccess, skipped: preview.skipped },
+    at: s.clock ? s.clock.floor : now,
+  } : null;
+  if (!preview.question && !changes) s = addTurn(s, "gatekeeper", "That changes nothing in your rules.", now);
+  return { ...s, thread: { ...s.thread, card } };
+}
+
+const hhmm = (t) => new Date(t).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
+/**
+ * Apply the open card, checked again against the rules as they are now (a card from an hour ago cannot
+ * apply something stale). Returns what happened, and says it in the thread.
+ */
+export function applyCard(state, now) {
+  let s = rollover(state, now);
+  const card = s.thread && s.thread.card;
+  if (!card) return { state: s, refused: "no_card" };
+  const p = chatPreview(s, card.answer, now);
+  if (p.error) return { state: s, refused: p.error };
+  const r = proposeRules(s, p.rules, now);
+  s = r.state;
+  let text;
+  let exam = null;
+  if (p.examEnd) {
+    exam = endExam(s, now);
+    s = exam.state;
+    text = exam.needsOk ? "To end exam mode early, tell me why. If the exam is over, it ends now; otherwise tomorrow morning."
+      : { ends_anyway: `Exam mode ends at ${hhmm(exam.until)} anyway.`, help_off: `With Claude help off, exam mode runs to its end at ${hhmm(exam.until)}.`,
+          asked_today: "I said no to ending it today. You can ask again tomorrow.", not_on: "Exam mode is already off." }[exam.refused] || "Nothing changed.";
+  } else if (r.refused === "asked_today") text = "I said no to that today. You can ask again tomorrow.";
+  else if (r.needsOk) text = `${r.now.length ? "The stricter part applies now. " : ""}To loosen the rest, tell me why: what changed?`;
+  else if (r.later.length) text = `Done. ${r.now.length ? "Some of it applies now; the rest " : "It "}applies tomorrow at ${hhmm(r.from)}.`;
+  else text = "Done. It applies now.";
+  s = addTurn({ ...s, thread: { ...s.thread, card: null } }, "gatekeeper", text, now);
+  return { state: s, outcome: { now: r.now, later: r.later, from: r.from, needsOk: !!r.needsOk || !!(exam && exam.needsOk), refused: r.refused, exam: exam && { refused: exam.refused, needsOk: !!exam.needsOk } } };
+}
+
+/** "Not this": the card goes, nothing changes. */
+export function dropCard(state, now) {
+  if (!state.thread || !state.thread.card) return state;
+  return addTurn({ ...state, thread: { ...state.thread, card: null } }, "gatekeeper", "Nothing changed.", now);
+}
+
+/** "Forget this talk": the thread and its card are cleared. */
+export function forgetThread(state) {
+  return { ...state, thread: { turns: [], card: null } };
 }

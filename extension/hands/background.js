@@ -287,14 +287,34 @@ const handlers = {
       help: engine.consented(state, "help"),
     };
   },
-  // One message in the rules chat. Nothing changes here: the answer comes back as a card to apply or not.
-  async chat({ message, history }) {
-    const req = engine.chatRequest(await load(), { message, history, now: Date.now() });
+  // One message in the one thread. Nothing changes here: an answer that changes rules comes back as a card.
+  async chat({ message }) {
+    const req = engine.chatRequest(await load(), { message, now: Date.now() });
     if (req.refused) return { refused: req.refused };
+    await update((s) => ({ state: engine.addTurn(s, "user", message, Date.now()) }));
     const r = await callRelay("/rules", req.payload);
-    if (!r.ok) return { failed: r.error || "unreachable", scope: r.scope };
-    const preview = engine.chatPreview(await load(), r.data, Date.now());
-    return preview.error ? { failed: preview.error } : preview;
+    const preview = r.ok ? engine.chatPreview(await load(), r.data, Date.now()) : null;
+    if (!r.ok || preview.error) {
+      const failed = r.ok ? preview.error : r.error || "unreachable";
+      await update((s) => ({ state: engine.addTurn(s, "gatekeeper", failed === "daily_limit" ? "That's enough changes by talking for today." : "Can't reach Claude right now. Your rules page still works.", Date.now()) }));
+      return { failed };
+    }
+    await update((s) => ({ state: engine.recordChatAnswer(s, r.data, preview, Date.now()) }));
+    return { ok: true };
+  },
+  // Apply the open card, checked again against the rules as they are now.
+  async applyCard() {
+    const out = await update((s) => engine.applyCard(s, Date.now()));
+    macSync(true);
+    return out.refused ? { refused: out.refused } : out.outcome;
+  },
+  async dropCard() {
+    await update((s) => ({ state: engine.dropCard(s, Date.now()) }));
+    return { ok: true };
+  },
+  async forgetThread() {
+    await update((s) => ({ state: engine.forgetThread(s) }));
+    return { ok: true };
   },
   // The watch week: start it from the welcome tab, end it early with one tap, and mark its summary seen.
   // Start exam mode, or move its end later: a tightening, at once.

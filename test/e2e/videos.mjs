@@ -120,6 +120,16 @@ try {
   await sleep(1200);
   s = await st();
   check("Apply made two video rules and recorded the yes to judging", s.rules.videos.length === 2 && s.consent.help === CONSENT.help, { videos: s.rules.videos, consent: s.consent });
+  // One thread (one-model plan, gap 3): a second Talk view, like the popup's, shows the same talk.
+  const second = await p.send("Target.createTarget", { url: (await sw.evaluate(`chrome.runtime.getURL("pages/talk.html")`)) });
+  await sleep(1500);
+  const other = await connect((t) => t.id === second.result.targetId);
+  const otherText = await other.evaluate(`document.getElementById('chat-log').innerText`);
+  check("a second view of Talk shows the same thread", /video games but keep educational/.test(otherText) && /Done/.test(otherText), otherText);
+  other.close();
+  await p.send("Target.closeTarget", { targetId: second.result.targetId });
+  await p.send("Target.activateTarget", { targetId: p.t.id });
+  await sleep(500);
   await p.send("Page.navigate", { url: rulesUrl }); await sleep(1200);
   const listed = await p.evaluate(`(document.getElementById('video-rules') || {}).innerText || ''`);
   check("the rules page lists them as chips under Video", /video games.*closed/i.test(listed) && /educational.*free/i.test(listed), listed);
