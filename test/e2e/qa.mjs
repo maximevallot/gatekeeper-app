@@ -115,6 +115,17 @@ try {
   check("nytimes.com goes to its own gate", (await p.evaluate("location.href")).includes("/pages/gate.html#https://www.nytimes.com/"), await p.evaluate("location.href"));
   check("the gate says its own limit closes it", /its own limit/.test(await p.evaluate(`document.getElementById('site').textContent`)) && /Closed all day/.test(await p.evaluate(`document.getElementById('headline').textContent`)));
 
+  // Tester run: with AI help off, the chat asks first and, on "Not now", says plainly it needs AI help; nothing is sent.
+  await p.send("Page.navigate", { url: base + "/pages/talk.html" }); await sleep(1000);
+  await p.evaluate(`document.getElementById('chat-message').value = 'less social media'; document.getElementById('chat-form').requestSubmit();`); await sleep(600);
+  const asked = !(await p.evaluate(`document.getElementById('chat-consent').classList.contains('hidden')`));
+  await p.evaluate(`document.getElementById('chat-no').click()`); await sleep(500);
+  const turns = await sw.evaluate(`chrome.storage.local.get('state').then(r => (r.state.thread.turns || []).length)`);
+  check("tester: with AI help off the chat asks, then says plainly it needs AI help, and nothing is sent",
+    asked && /needs AI help/.test(await p.evaluate(`(document.getElementById('chat-needs-help') || {}).textContent || ''`)) && turns === 0, { asked, turns });
+  await p.send("Page.navigate", { url: base + "/pages/rules.html" }); await sleep(1000);
+  check("tester #8: the calendar field says which link stays up to date", /Calendar Feed/.test(await p.evaluate(`document.getElementById('calendar-hint').textContent`)));
+
   // Start exam mode from Today (one-model plan, gap 2): it applies at once, and the rules page shows it.
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(800);
   await p.evaluate(`document.getElementById('exam-start').click()`); await sleep(300);

@@ -159,6 +159,10 @@ $("chat-yes").addEventListener("click", async () => {
 $("chat-no").addEventListener("click", () => {
   $("chat-consent").classList.add("hidden");
   $("chat-form").classList.remove("hidden");
+  // Said plainly: changing rules by talking needs AI help; nothing was sent (tester run).
+  if (!document.getElementById("chat-needs-help")) {
+    $("chat-log").append(el("div", { class: "small muted", id: "chat-needs-help", style: "align-self: center" }, "Changing rules by talking needs AI help. Nothing was sent. Your rules page works without it."));
+  }
 });
 
 $("forget").addEventListener("click", async () => { await ask("forgetThread"); await load(); });
