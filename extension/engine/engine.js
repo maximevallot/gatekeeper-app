@@ -210,8 +210,10 @@ export function rollover(state, now, { mono, run } = {}) {
   const c = s.clock || { floor: 0 };
   const n = (Number(now) || 0) + (c.offset || 0);
   let floor = c.floor || 0, strict = c.strict ?? floor, held = c.held || null, drift = c.drift || 0, last = c.last || null;
-  if (!c.guard) {
+  if (!c.guard || !floor) {
+    // Unguarded, or the very first reading of a new install: taken as it is.
     floor = strict = Math.max(n, floor);
+    if (c.guard && mono !== undefined) last = { wall: n, mono, run };
   } else if (mono === undefined) {
     // A read between ticks (a page, an alarm): time moves only a little here; anything bigger waits for the tick.
     if (!held && n > floor && n - floor <= MAX_JUMP_MS) floor = strict = n;
@@ -233,7 +235,7 @@ export function rollover(state, now, { mono, run } = {}) {
       strict += Math.max(0, Math.min(dm ?? 0, MAX_JUMP_MS));
     } else {
       // Running: small steps add up (14 minutes at a time is still a moved clock).
-      drift += dw - dm;
+      drift += dm === null ? 0 : dw - dm;
       if (!held && Math.abs(drift) > MAX_DRIFT_MS) held = { kind: "drift", seen: n, mono, run };
       if (held) { floor += Math.max(0, dm); strict += Math.max(0, dm); }
       else floor = strict = Math.max(floor, n);

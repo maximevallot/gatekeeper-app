@@ -88,6 +88,22 @@ test("#2/#6: small steps hold the clock; a night asleep after them still turns t
   assert.ok(examOn(s), "exam mode keeps to sure time");
 });
 
+test("a new install takes its first reading of the clock as it is, with the relay out of reach", () => {
+  let s = guardClock(initialState());
+  const now = SAT;
+  s = rollover(s, now);
+  assert.equal(s.clock.floor, now);
+  s = tickAt(s, "https://example.org/", now + 2000, 5000);
+  s = tickAt(s, "https://example.org/", now + 4000, 7000);
+  assert.equal(s.clock.floor, now + 4000);
+  assert.equal(timeCheckNeeded(s), false);
+  // And from a first tick, not a plain read.
+  let f = tickAt(guardClock(initialState()), "https://example.org/", now, 1000, "r9");
+  f = tickAt(f, "https://example.org/", now + 2000, 3000, "r9");
+  assert.equal(f.clock.floor, now + 2000);
+  assert.equal(timeCheckNeeded(f), false);
+});
+
 test("#2/#6: an ordinary day of ticks never holds the clock", () => {
   let s = guardClock(setUp({ social: 30 }));
   for (let i = 1; i <= 900; i++) s = tickAt(s, "https://example.org/", SAT + i * 2000 + (i % 3), i * 2000);
