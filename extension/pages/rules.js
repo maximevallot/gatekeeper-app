@@ -373,6 +373,8 @@ async function renderMac() {
   // and that a reload connects it, rather than showing the switch off.
   const m = await ask("mac").catch(async () => ({ permitted: await chrome.permissions.contains(NATIVE).catch(() => false), error: "reload_needed" }));
   m.error = m.macError || m.error;
+  // Testers can't get Gatekeeper for Mac yet: its switch shows only once a Mac app has answered, or it is on.
+  $("mac-row").classList.toggle("hidden", !m.seen && !m.permitted);
   $("mac").checked = !!m.permitted;
   $("mac-sub").textContent = !m.permitted
     ? "Off. With Gatekeeper for Mac on, your goal, each kind's minutes today and exam mode go to a file on this Mac that apps you run can read. Nothing goes to a server."

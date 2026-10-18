@@ -133,6 +133,8 @@ async function macExchange(force) {
   // names what it couldn't read.
   const mac = (reply && reply.mac) || null;
   const outdated = !!(mac && Array.isArray(mac.reads) && !mac.reads.includes(snap.v));
+  // A Mac app answered: from now on the rules page shows its switch (tester run, #5).
+  if (reply) chrome.storage.local.set({ macSeen: true });
   macStatus = {
     connected: !!(reply && reply.ok) && !outdated,
     error: outdated ? "mac_outdated" : reply && reply.ok ? null : (reply && reply.error) || "bad_reply",
@@ -435,7 +437,7 @@ const handlers = {
     await macSync(true);
     // As macError: a reply with "error" would read to the page's ask() as the worker failing.
     const { error, ...rest } = macStatus;
-    return { ...rest, macError: error, permitted: await chrome.permissions.contains(NATIVE) };
+    return { ...rest, macError: error, permitted: await chrome.permissions.contains(NATIVE), seen: !!(await chrome.storage.local.get("macSeen")).macSeen };
   },
   async watch({ goal }) {
     await update((s) => ({ state: engine.startWatch(s, { goal }, Date.now()) }));

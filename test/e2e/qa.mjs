@@ -67,6 +67,7 @@ try {
   await p.send("Page.navigate", { url: base + "/pages/rules.html" }); await sleep(1200);
   const blindText = await p.evaluate(`(document.getElementById('blind-warning') || {}).textContent || ''`);
   check("C2: the rules page says access to youtube.com was turned off", /youtube\.com/.test(blindText), blindText);
+  check("tester #5: no Mac app has connected, so the rules page doesn't show its switch", await p.evaluate(`document.getElementById('mac-row').classList.contains('hidden')`));
   check("H5: the rules page's settings say private windows are not covered, with the toggle", /Not covered/.test(await p.evaluate(`document.getElementById('private-pill').textContent`)) && /Allow in Private/.test(await p.evaluate(`document.getElementById('private-sub').textContent`)));
   check("C2: the badge flags it", (await sw.evaluate(`chrome.action.getBadgeText({})`)) === "!");
 
