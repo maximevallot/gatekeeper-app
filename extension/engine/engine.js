@@ -21,7 +21,7 @@
 // videos.js) and the rules chat. Each yes to sending something is kept with the version of the text the
 // user agreed to (CONSENT); when what is sent changes, the version goes up and the user is asked again.
 
-import { KINDS, hostOf, matches, PUBLIC_SUFFIXES, ruleDomain } from "./catalog.js";
+import { KINDS, hostOf, matches, PUBLIC_SUFFIXES, ruleDomain, isStudyHost, isSearchPage, STUDY_DOMAINS, SEARCH_ALLOW } from "./catalog.js";
 export { PUBLIC_SUFFIXES, ruleDomain };
 import { calendarUrl, parseIcs, EXAM_WORDS } from "./calendar.js";
 import {
@@ -190,6 +190,13 @@ function siteLimitFor(s, host) {
     if (matches(host, domain) && (!best || domain.length > best.domain.length)) best = { domain, minutes };
   }
   return best;
+}
+
+/** A study site: a university's, a course tool's (catalog.js), one sorted as study, or one the user named. */
+export function studySite(s, host) {
+  if (!host) return false;
+  if (isStudyHost(host)) return true;
+  return (s.rules.study || []).some((d) => matches(host, d));
 }
 
 /** The name a site is sorted under: the host without "www.". */
@@ -535,7 +542,9 @@ export function decide(state, { url, title = "", now }) {
     if (video && video.verdict === "allow" && !video.watched) return video;
     if (lim) return siteDecision(s, url, title, lim);
     const kind = kindOf(s, url);
-    if (!host || kind === "study") return { verdict: "allow", kind, watched: false };
+    // Study sites and search result pages stay open (Maxime's tester run, 2026-10-18): exam mode never strands a
+    // student from Canvas because a search page or the course site was closed.
+    if (!host || kind === "study" || studySite(s, host) || isSearchPage(url)) return { verdict: "allow", kind, watched: false, study: true };
     const e = entryFor(s, host);
     const domain = e ? e.domain : siteDomain(url);
     const ladder = ladderKey(s, url);
@@ -808,7 +817,9 @@ export function enforcement(state, now, { withheld = [], seeAll = false } = {}) 
     allow: [...new Set([
       ...Object.entries(s.sorted || {}).filter(([, k]) => k === "study").map(([d]) => d),
       ...Object.entries(s.passes || {}).filter(([, p]) => p.secondsLeft > 0).map(([d]) => d),
+      ...STUDY_DOMAINS, ...(s.rules.study || []), "edu",
     ])].filter((d) => !closed.includes(d)),
+    allowUrls: SEARCH_ALLOW,
   } : null;
   return {
     examAll,
@@ -840,7 +851,8 @@ export function cleanRules(rules, fallback) {
   const exam = e && Number.isFinite(Number(e.until)) ? { until: Number(e.until), goal: String(e.goal || "").replace(/\s+/g, " ").trim().slice(0, 200),
     ...(Number.isFinite(Number(e.from)) && e.from ? { from: Number(e.from) } : {}),
     at: Number.isFinite(Number(e.at)) && e.at ? Math.min(Number(e.at), Number(e.until)) : Number(e.until) } : null;
-  return { kinds, sites, siteLimits, videos: cleanVideos(r.videos), dayStart, exam };
+  const study = [...new Set((Array.isArray(r.study) ? r.study : []).map(ruleDomain).filter(Boolean))].slice(0, 100);
+  return { kinds, sites, siteLimits, study, videos: cleanVideos(r.videos), dayStart, exam };
 }
 
 /**
@@ -900,6 +912,11 @@ export function tighten(cur, next, state) {
     const pick = stricter ? nextLimits : curLimits;
     if (d in pick) siteLimits[d] = pick[d];
   }
+  // A study site opens in exam mode: naming one applies now outside exam mode, and waits during it. Removing one
+  // applies now.
+  const examNow = examOn(state) || !!(next.exam && next.exam.until > strictNow(state));
+  const curStudy = cur.study || [], nextStudy = next.study || [];
+  const study = examNow ? nextStudy.filter((d) => curStudy.includes(d)) : nextStudy.slice();
   const youtube = kindUnder(cur, "youtube.com"); // the kind YouTube's own pages count against today
   const videos = tightenVideos(cur.videos || [], next.videos || [], { watched: !!(youtube && kinds[youtube]) });
   // Exam mode in force can only be extended now; ending or shortening it waits (the sentence ends it at once).
@@ -907,7 +924,7 @@ export function tighten(cur, next, state) {
   const a = cur.exam && cur.exam.until > t ? cur.exam : null, b = next.exam || null;
   // The exam's own time in force never moves earlier: ending at once depends on it.
   const exam = a ? (b && b.until >= a.until ? { ...b, at: Math.max(a.at || a.until, b.at || b.until) } : a) : b;
-  return { ...next, kinds, sites, siteLimits, videos, dayStart: cur.dayStart, exam };
+  return { ...next, kinds, sites, siteLimits, study, videos, dayStart: cur.dayStart, exam };
 }
 
 function canon(v) {
@@ -922,33 +939,37 @@ export function describeChanges(cur, next) {
   const out = [];
   for (const k of new Set([...Object.keys(cur.kinds), ...Object.keys(next.kinds)])) {
     const a = cur.kinds[k], b = next.kinds[k];
-    if (a && !b) out.push({ kind: k, text: `${label(k)}: no longer watched` });
-    else if (!a && b) out.push({ kind: k, text: `${label(k)}: ${minutesText(b.minutes)}` });
-    else if (a.minutes !== b.minutes) out.push({ kind: k, text: `${label(k)}: ${minutesText(a.minutes)} → ${minutesText(b.minutes)}` });
+    if (a && !b) out.push({ kind: k, target: "kind:" + k, text: `${label(k)}: no longer watched` });
+    else if (!a && b) out.push({ kind: k, target: "kind:" + k, text: `${label(k)}: ${minutesText(b.minutes)}` });
+    else if (a.minutes !== b.minutes) out.push({ kind: k, target: "kind:" + k, text: `${label(k)}: ${minutesText(a.minutes)} → ${minutesText(b.minutes)}` });
   }
   const sites = new Set([...Object.keys(cur.sites || {}), ...Object.keys(next.sites || {})]);
   for (const d of sites) {
     const a = (cur.sites || {})[d], b = (next.sites || {})[d];
-    if (a && !b) out.push({ site: d, text: `${d}: no longer counted as ${label(a).toLowerCase()}` });
-    else if (!a && b) out.push({ site: d, text: `${d}: counted as ${label(b).toLowerCase()}` });
-    else if (a !== b) out.push({ site: d, text: `${d}: ${label(a).toLowerCase()} → ${label(b).toLowerCase()}` });
+    if (a && !b) out.push({ site: d, target: "site:" + d, text: `${d}: no longer counted as ${label(a).toLowerCase()}` });
+    else if (!a && b) out.push({ site: d, target: "site:" + d, text: `${d}: counted as ${label(b).toLowerCase()}` });
+    else if (a !== b) out.push({ site: d, target: "site:" + d, text: `${d}: ${label(a).toLowerCase()} → ${label(b).toLowerCase()}` });
   }
   const limits = new Set([...Object.keys(cur.siteLimits || {}), ...Object.keys(next.siteLimits || {})]);
   for (const d of limits) {
     const has = (r) => !!r.siteLimits && d in r.siteLimits;
     const a = has(cur) ? cur.siteLimits[d] : undefined, b = has(next) ? next.siteLimits[d] : undefined;
     if (a === b) continue;
-    if (b === undefined) out.push({ siteLimit: d, text: `${d}: limit removed` });
-    else if (a === undefined) out.push({ siteLimit: d, text: `${d}: ${siteLimitText(b)}` });
-    else if (a && b) out.push({ siteLimit: d, text: `${d}: ${a} → ${b} min a day` });
-    else out.push({ siteLimit: d, text: `${d}: ${siteLimitText(a)} → ${siteLimitText(b)}` });
+    const target = "limit:" + d;
+    if (b === undefined) out.push({ siteLimit: d, target, text: `${d}: limit removed` });
+    else if (a === undefined) out.push({ siteLimit: d, target, text: `${d}: ${siteLimitText(b)}` });
+    else if (a && b) out.push({ siteLimit: d, target, text: `${d}: ${a} → ${b} min a day` });
+    else out.push({ siteLimit: d, target, text: `${d}: ${siteLimitText(a)} → ${siteLimitText(b)}` });
   }
-  out.push(...describeVideoChanges(cur.videos || [], next.videos || []));
-  if (cur.dayStart !== next.dayStart) out.push({ text: `The day starts at ${next.dayStart}:00` });
+  const sa = cur.study || [], sb = next.study || [];
+  for (const d of sb) if (!sa.includes(d)) out.push({ study: d, target: "study:" + d, text: `${d}: a study site, open in exam mode` });
+  for (const d of sa) if (!sb.includes(d)) out.push({ study: d, target: "study:" + d, text: `${d}: no longer a study site` });
+  out.push(...describeVideoChanges(cur.videos || [], next.videos || []).map((c) => ({ ...c, target: "video:" + c.video })));
+  if (cur.dayStart !== next.dayStart) out.push({ target: "dayStart", text: `The day starts at ${next.dayStart}:00` });
   const ea = cur.exam || null, eb = next.exam || null;
   if ((ea && ea.until) !== (eb && eb.until)) {
     const until = (x) => new Date(x.until).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" });
-    out.push({ text: eb ? `Exam mode until ${until(eb)}` : "Exam mode ends" });
+    out.push({ target: "exam", text: eb ? `Exam mode until ${until(eb)}` : "Exam mode ends" });
   }
   return out;
 }
@@ -995,12 +1016,19 @@ export function proposeRules(state, next, now, { source = "extension", undoable 
   if (same(within, want)) {
     return { state: logged(withoutLoosen({ ...base0, pending: { rules: want, from, key: loosenKey(later), ok: true } }, "rules"), later), now: nowChanges, later, from, needsOk: false };
   }
-  const asked = describeChanges(within, want);
+  let asked = describeChanges(within, want);
+  // A no holds only the rule it was about until the morning (Maxime, 2026-10-18): Video's minutes after a no on
+  // Video, not Games, not exam mode, not a study site. Those parts go back to what was approved; the rest is asked.
+  const held = asked.filter((c) => c.target && ((s.denied || {})["t:" + c.target] || 0) > t);
+  if (held.length && held.length < asked.length) {
+    Object.assign(want, revertTargets(want, within, held.map((c) => c.target)));
+    asked = describeChanges(within, want);
+  }
   const key = loosenKey(asked);
   const approvedOnly = keepApproved ? { rules: keepApproved, from, key: loosenKey(describeChanges(applied, keepApproved)), ok: true } : null;
   // After a no, no other loosening of the rules is asked about until the morning (QA round 2, H3): not the
   // same sentence, not one minute more.
-  if (((s.denied || {}).rules || 0) > t || ((s.denied || {})[key] || 0) > t) {
+  if ((held.length && !asked.some((c) => !held.includes(c) && !(c.target && ((s.denied || {})["t:" + c.target] || 0) > t))) || ((s.denied || {})[key] || 0) > t) {
     return { state: logged(withoutLoosen({ ...base0, pending: approvedOnly }, "rules")), now: nowChanges, later: approvedOnly ? describeChanges(applied, keepApproved) : [], from: approvedOnly ? from : null, refused: "asked_today", denied: asked };
   }
   // With Claude help on, the agent holds the key: the loosening waits for its yes, then for the morning.
@@ -1013,8 +1041,28 @@ export function proposeRules(state, next, now, { source = "extension", undoable 
     return { state: logged(withoutLoosen({ ...base0, pending: { rules: want, from, key, ok: true } }, "rules"), later), now: nowChanges, later, from, needsOk: false };
   }
   const pending = { rules: want, approved: keepApproved, from, key, ok: false };
-  const queued = withLoosen({ ...base0, pending }, { kind: "rules", changes: asked.map((c) => c.text), key, asked: "" });
+  const queued = withLoosen({ ...base0, pending }, { kind: "rules", changes: asked.map((c) => c.text), targets: asked.map((c) => c.target).filter(Boolean), key, asked: "" });
   return { state: logged(queued, later), now: nowChanges, later, from, needsOk: true, asked };
+}
+
+/** `want` with these changes taken back to `base`: "kind:video", "site:x.io", "limit:x.io", "study:x.edu", "video:v1", "dayStart", "exam". */
+function revertTargets(want, base, targets) {
+  const r = structuredClone(want);
+  const back = (field, key) => {
+    r[field] = { ...(r[field] || {}) };
+    if (base[field] && key in base[field]) r[field][key] = structuredClone(base[field][key]); else delete r[field][key];
+  };
+  for (const tg of targets) {
+    const i = tg.indexOf(":"), what = i < 0 ? tg : tg.slice(0, i), key = i < 0 ? "" : tg.slice(i + 1);
+    if (what === "kind") back("kinds", key);
+    else if (what === "site") back("sites", key);
+    else if (what === "limit") back("siteLimits", key);
+    else if (what === "study") r.study = (base.study || []).includes(key) ? [...new Set([...(r.study || []), key])] : (r.study || []).filter((x) => x !== key);
+    else if (what === "video") { const v = (base.videos || []).find((x) => x.id === key); r.videos = (r.videos || []).filter((x) => x.id !== key); if (v) r.videos.push(structuredClone(v)); }
+    else if (what === "dayStart") r.dayStart = base.dayStart;
+    else if (what === "exam") r.exam = base.exam;
+  }
+  return r;
 }
 
 /** Whether a loosening needs the agent: Claude help on, or turned off only today (it counts from the morning). */
@@ -1200,7 +1248,8 @@ export function chatRequest(state, { message, history = [], now }) {
       exam: examForRelay(s),
       now: localIso(s.clock.floor),
       // A no holds every loosening until the morning: the relay then drops loosening ops and says so (QA round 3, N1).
-      loosenLocked: ((s.denied || {}).rules || 0) > s.clock.floor,
+      // A no now holds only its own rule (2026-10-18), so loosening as a whole is never locked; the card says which.
+      loosenLocked: false,
     },
   };
 }
@@ -1245,6 +1294,7 @@ export function chatPreview(state, answer, now) {
   // "End exam mode early" is shown on the card as a loosening for the agent, never as done.
   const end = examEnd && examOn(s) ? { text: "End exam mode early", agent: true } : null;
   return { reply, question, rules, now: nowChanges, later: end ? [...later, end] : later, from: later.length || end ? r.from : null, refused: r.refused,
+    held: r.denied && r.denied.length ? r.denied.map((c) => c.text.split(":")[0]) : null,
     skipped: skipped.length, needsAccess, examEnd: !!end };
 }
 
@@ -1385,7 +1435,11 @@ export function applyLoosenAnswer(state, { answer, message = "", now }) {
     // "Now" is a rule, not a judgement (QA round 2, C3): only once the exam on the calendar has begun.
     const said = answer.when === "now" || answer.examDone === true;
     const at = l.kind === "exam" && said && examAt(s) ? s.clock.floor : morning;
-    s = l.kind === "exam" ? examEnd(s, at) : { ...s, pending: s.pending ? { ...s.pending, ok: true, approved: null, from: Math.max(s.pending.from, morning) } : null };
+    // A study site asked for during exam mode opens at once on a yes: it is needed now, and only for studying.
+    const studyNow = l.kind === "rules" && examOn(s) && (l.targets || []).length && l.targets.every((tg) => tg.startsWith("study:")) && s.pending;
+    s = l.kind === "exam" ? examEnd(s, at)
+      : studyNow ? { ...s, rules: { ...s.rules, study: [...new Set([...(s.rules.study || []), ...l.targets.map((tg) => tg.slice(6))])] }, pending: null }
+      : { ...s, pending: s.pending ? { ...s.pending, ok: true, approved: null, from: Math.max(s.pending.from, morning) } : null };
     s = { ...withoutLoosen(s, l.kind), log: log("allow") };
     if (l.kind === "exam") s = { ...s, log: logEvent(s, "exam.end", { how: at === s.clock.floor ? "agent, at once" : "agent, next morning", at: at }) };
     return { state: s, result: { decision: "allow", reply: answer.reply, from: at, now: at === s.clock.floor } };
@@ -1394,7 +1448,9 @@ export function applyLoosenAnswer(state, { answer, message = "", now }) {
   // What the agent approved earlier still applies in the morning; only what it was asked now is refused.
   const p = s.pending;
   const kept = l.kind === "rules" ? (p && p.approved ? { rules: p.approved, from: p.from, key: p.key, ok: true } : null) : p;
-  s = { ...withoutLoosen({ ...s, pending: kept, denied: { ...(s.denied || {}), [l.key]: s.usage.endsAt, [l.kind]: s.usage.endsAt } }, l.kind), log: log("deny") };
+  // The no holds what it was about until the morning: each of the request's rules, or ending exam mode.
+  const held = Object.fromEntries((l.kind === "exam" ? ["exam"] : (l.targets || [])).map((tg) => [l.kind === "exam" ? "exam" : "t:" + tg, s.usage.endsAt]));
+  s = { ...withoutLoosen({ ...s, pending: kept, denied: { ...(s.denied || {}), [l.key]: s.usage.endsAt, ...held } }, l.kind), log: log("deny") };
   return { state: s, result: { decision: "deny", reply: answer.reply, until: s.usage.endsAt } };
 }
 
@@ -1471,8 +1527,9 @@ export function recordChatAnswer(state, answer, preview, now) {
     at: s.clock ? s.clock.floor : now,
   } : null;
   // After a no today, the reply says why nothing loosens; the generic line would contradict it (QA round 3, chat N1).
-  const locked = ((s.denied || {}).rules || 0) > ((s.clock && s.clock.floor) || 0) || preview.refused === "asked_today";
+  const locked = preview.refused === "asked_today";
   if (!preview.question && !changes && !locked) s = addTurn(s, "gatekeeper", "That changes nothing in your rules.", now);
+  if (locked && !changes) s = addTurn(s, "gatekeeper", `I said no to loosening ${preview.held ? preview.held.join(", ") : "that"} today, so it stays as it is. You can ask again after ${(s.rules && s.rules.dayStart) ?? 4}:00.`, now);
   return { ...s, thread: { ...s.thread, card } };
 }
 

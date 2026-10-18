@@ -94,3 +94,29 @@ export function ruleDomain(raw) {
   if (!host || !host.includes(".") || PUBLIC_SUFFIXES.has(host)) return null;
   return host.replace(/^www\./, "");
 }
+
+// Study sites stay open in exam mode (Maxime's tester run, 2026-10-18): universities (.edu, .ac.xx, .edu.xx),
+// the course tools students use, and Google's documents and Scholar. Plus, in the engine, sites sorted as study
+// and the ones the user names as study.
+export const STUDY_DOMAINS = [
+  "instructure.com", "canvas.net", "gradescope.com", "piazza.com", "edstem.org", "overleaf.com",
+  "docs.google.com", "drive.google.com", "scholar.google.com", "classroom.google.com",
+];
+
+export function isStudyHost(host) {
+  if (!host) return false;
+  if (/\.edu$|\.edu\.[a-z]{2}$|\.ac\.[a-z]{2}$/.test(host)) return true;
+  return STUDY_DOMAINS.some((d) => matches(host, d));
+}
+
+// Search result pages stay open in exam mode, so a student who doesn't know Canvas's address can find it.
+export const SEARCH_ALLOW = ["||google.*/search", "||bing.com/search", "||duckduckgo.com^", "||search.brave.com^", "||ecosia.org/search", "||kagi.com/search"];
+
+export function isSearchPage(url) {
+  let u;
+  try { u = new URL(url); } catch { return false; }
+  const host = u.hostname.toLowerCase().replace(/^www\./, "");
+  if (/^google\.[a-z.]{2,6}$/.test(host)) return u.pathname === "/search";
+  if (host === "bing.com" || host === "ecosia.org" || host === "kagi.com") return u.pathname === "/search";
+  return host === "duckduckgo.com" || host === "search.brave.com";
+}

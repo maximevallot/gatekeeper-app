@@ -127,12 +127,16 @@ test("#4 (chat N1): after a no, the chat tells the relay loosening is locked, an
   let s = setUp({ games: 15 });
   s = proposeRules(s, { ...s.rules, kinds: { games: { minutes: 30 } } }, SAT).state;
   s = applyLoosenAnswer(s, { answer: { decision: "deny", reply: "The rule stays." }, message: "more", now: SAT }).state;
-  assert.equal(chatRequest(s, { message: "give games 30 min", now: SAT }).payload.loosenLocked, true);
-  assert.equal(chatRequest(setUp({ games: 15 }), { message: "hi", now: SAT }).payload.loosenLocked, false);
-  const answer = { reply: "I said no to a loosening today, so Games 30 waits: ask again after 4:00.", question: null, diff: [] };
+  // Since 2026-10-18 a no holds only its own rule, so the relay is never told everything is locked; the thread says
+  // which rule is held instead of the generic line.
+  assert.equal(chatRequest(s, { message: "give games 30 min", now: SAT }).payload.loosenLocked, false);
+  const answer = { reply: "Games: 30 minutes a day.", question: null, diff: [{ op: "budget", kind: "games", minutes: 30 }] };
   const p = chatPreview(s, answer, SAT);
+  assert.equal(p.refused, "asked_today");
   const after = recordChatAnswer(s, answer, p, SAT);
-  assert.deepEqual(after.thread.turns.slice(-1).map((x) => x.text), [answer.reply], "only the relay's words");
+  const last = after.thread.turns.at(-1).text;
+  assert.match(last, /I said no to loosening Games today/);
+  assert.ok(!after.thread.turns.some((x) => x.text === "That changes nothing in your rules."));
 });
 
 test("#3 (chat N2): Apply on \"end exam mode\" says what can happen without a calendar", () => {
@@ -153,4 +157,29 @@ test("#3: exam mode started from the chat keeps the exam's own time the relay se
   assert.equal(examAt(rollover(on, THU9 - 3600e3)), null, "not before");
   const none = chatPreview(s, { reply: "ok", diff: [{ op: "examStart", until: THU12, at: null }] }, SAT);
   assert.equal(proposeRules(s, none.rules, SAT).state.rules.exam.at, THU12, "without it, the exam's time is the end");
+});
+
+test("tester run, #1: exam mode never strands a student from study: search pages, study sites, and a study site asked for opens at once", async () => {
+  const { applyDiff } = await import("../extension/engine/videos.js");
+  let s = startExam(setUp({ video: 20 }), { until: SAT + 2 * 86400e3, goal: "15.425 midterm" }, SAT).state;
+  for (const u of ["https://search.brave.com/search?q=mit+canvas", "https://www.google.com/search?q=mit+canvas", "https://www.bing.com/search?q=x",
+    "https://duckduckgo.com/?q=x", "https://www.ecosia.org/search?q=x", "https://kagi.com/search?q=x",
+    "https://canvas.mit.edu/courses/1", "https://mit.instructure.com/", "https://www.gradescope.com/", "https://piazza.com/class/x",
+    "https://edstem.org/us/courses/1", "https://www.overleaf.com/project", "https://docs.google.com/document/d/1", "https://drive.google.com/",
+    "https://scholar.google.com/", "https://web.mit.edu/", "https://www.ox.ac.uk/"]) {
+    assert.equal(decide(s, { url: u, now: SAT + 60e3 }).verdict, "allow", u);
+  }
+  assert.equal(decide(s, { url: "https://www.google.com/maps", now: SAT }).verdict, "block", "Google beyond search stays closed");
+  assert.equal(decide(s, { url: "https://www.youtube.com/", now: SAT }).verdict, "block");
+  // An earlier no about Video's minutes doesn't hold anything else.
+  s = proposeRules(s, { ...s.rules, kinds: { video: { minutes: 40 } } }, SAT).state;
+  s = applyLoosenAnswer(s, { answer: { decision: "deny", reply: "No." }, message: "more video", now: SAT }).state;
+  // "I need studyhall.example for studying": the chat names it as study; the agent says yes; it opens at once.
+  const want = applyDiff(s.rules, [{ op: "study", domain: "studyhall.example" }]).rules;
+  const r = proposeRules(s, want, SAT + 120e3);
+  assert.equal(r.needsOk, true, "not refused because of the earlier no");
+  assert.equal(decide(r.state, { url: "https://studyhall.example/", now: SAT + 120e3 }).verdict, "block", "not before the agent's yes");
+  const y = applyLoosenAnswer(r.state, { answer: { decision: "allow", reply: "Open it." }, message: "my course notes are there", now: SAT + 130e3 }).state;
+  assert.equal(decide(y, { url: "https://studyhall.example/notes", now: SAT + 130e3 }).verdict, "allow", "it opens now");
+  assert.ok(examOn(y));
 });

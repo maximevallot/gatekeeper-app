@@ -115,6 +115,14 @@ try {
   check("#10: in exam mode, a site Gatekeeper doesn't know goes to the gate", href.includes("/pages/gate.html#" + local + "/notes"), href);
   await sleep(800);
   check("#10: the gate says everything but study is closed", /Everything but study/.test(await p.evaluate(`document.getElementById('used').textContent`)));
+  // Maxime's tester run, #1: in exam mode a search result page and a university's site load; the browser took every rule.
+  const dyn = await sw.evaluate(`chrome.declarativeNetRequest.getDynamicRules().then((r) => r.map((x) => x.condition.urlFilter || "").filter(Boolean))`);
+  check("tester #1: the search pages' allow rules are in the browser", dyn.includes("||google.*/search") && dyn.includes("||search.brave.com^"), dyn);
+  for (const u of ["https://search.brave.com/search?q=mit+canvas", "https://web.mit.edu/"]) {
+    await p.send("Page.navigate", { url: u }); await sleep(2500);
+    const at = await p.evaluate("location.href").catch(() => "");
+    check(`tester #1: in exam mode ${new URL(u).hostname} isn't sent to the gate`, !at.includes("/pages/gate.html"), at);
+  }
 
   // #2: the worker's clock three days ahead, past the exam's end.
   await sw.evaluate(`(() => { self.__realNow = Date.now.bind(Date); Date.now = () => self.__realNow() + 3 * 86400e3; return 1; })()`);

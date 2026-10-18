@@ -185,6 +185,7 @@ function addSiteRow() {
     el("input", { class: "field", id: "new-site", placeholder: "example.com", autocomplete: "off", "aria-label": "A site to add" }),
     el("select", { class: "field", id: "new-kind", style: "flex: 0 0 140px", "aria-label": "Its limit" },
       el("option", { value: "" }, "Its own limit"),
+      el("option", { value: "study" }, "A study site (open in exam mode)"),
       ...KIND_ORDER.map((k) => el("option", { value: k }, `Counts as ${KINDS[k].label.toLowerCase()}`))),
     el("button", { class: "btn", type: "submit" }, "Add"));
   const open = el("button", { class: "link", type: "button", style: "align-self: flex-start" }, "Limit one site");
@@ -196,10 +197,11 @@ function addSiteRow() {
     if (!d.includes(".")) return;
     const kind = $("new-kind").value;
     // Gatekeeper may act only on the sites in its catalog; any other is asked for here, inside the click.
-    const access = kind || !catalogKind(d) ? chrome.permissions.request({ origins: [`*://*.${d}/*`] }) : Promise.resolve(true);
+    const access = kind === "study" ? Promise.resolve(true) : kind || !catalogKind(d) ? chrome.permissions.request({ origins: [`*://*.${d}/*`] }) : Promise.resolve(true);
     access.then((granted) => {
       if (!granted) { saved(`Not added: Gatekeeper needs access to ${d}`); return; }
       if (!kind) { setLimit(d, DEFAULT_MINUTES); return; } // its own limit, counted against nothing else
+      if (kind === "study") { const r = wanted(); r.study = [...new Set([...(r.study || []), d])]; propose(r); return; }
       const r = wanted();
       r.sites = { ...(r.sites || {}), [d]: kind };
       propose(r);
