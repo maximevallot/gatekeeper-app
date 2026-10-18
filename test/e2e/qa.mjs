@@ -85,6 +85,7 @@ try {
   // appearance chosen on the rules page carries to every page.
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(1000);
   check("Today shows Video locked", (await p.evaluate(`!!document.querySelector('.ring[data-kind=video] .state.closed')`)) === true);
+  check("Figtree loads from the extension's own fonts folder", await p.evaluate(`document.fonts.load('16px Figtree').then((f) => f.length > 0 && [...document.fonts].some((x) => /Figtree/.test(x.family) && x.status === "loaded"))`));
   await p.send("Page.navigate", { url: base + "/pages/week.html" }); await sleep(1000);
   const gatesShown = Number(await p.evaluate(`document.getElementById('gates').textContent`));
   check("the week counts the gates shown today", gatesShown >= 2, gatesShown);
