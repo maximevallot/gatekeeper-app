@@ -43,6 +43,8 @@ const snapshots = () => seen;
 try {
   const ext = join(work, "extension");
   cpSync(fileURLToPath(new URL("../../extension", import.meta.url)), ext, { recursive: true });
+  // 0.3.0: no relay in this run, and never the live one's account endpoints: the relay address goes nowhere.
+  { const cfg = join(ext, "config.js"); writeFileSync(cfg, readFileSync(cfg, "utf8").replace(/export const RELAY_URL = ".*";/, 'export const RELAY_URL = "http://127.0.0.1:9";')); }
   const m = JSON.parse(readFileSync(join(ext, "manifest.json"), "utf8"));
   m.permissions.push("nativeMessaging");
   m.optional_permissions = [];

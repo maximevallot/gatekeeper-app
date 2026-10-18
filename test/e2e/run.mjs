@@ -81,7 +81,7 @@ try {
   await p.evaluate(`document.getElementById('start').click()`);
   await sleep(800);
   const done = await p.evaluate(`document.getElementById('done-privacy').textContent`);
-  check("M3: with Claude help off, the done panel says nothing leaves the browser", /Nothing leaves this browser/.test(done), done);
+  check("M3: with Claude help off, the done panel says plainly what the account keeps", /Finishing makes your Gatekeeper account|Your Gatekeeper account holds/.test(done), done);
   const sw = await connect((t) => t.type === "service_worker");
   const st = () => sw.evaluate(`chrome.storage.local.get('state').then(r => r.state)`);
   const rulesUrl = (await sw.evaluate(`chrome.runtime.getURL("pages/rules.html")`));

@@ -4,7 +4,7 @@
 //   H1  embedded players of a closed kind are blocked;
 //   H3  when a kind closes, every open tab of it goes to the gate, not only the front one;
 //   H5  the rules page warns that private windows are not covered;
-//   M3  with Claude off, the welcome tab says nothing leaves the browser;
+//   M3  with Claude off, the welcome tab says plainly what the account keeps;
 //   and the simplified design's Today, week and appearance.
 // Withheld access is made by leaving youtube.com out of the test copy's host permissions, which is what
 // site access "On click" or removing one site does to the extension's granted permissions.
@@ -33,6 +33,8 @@ try {
 
   const ext = join(work, "extension");
   cpSync(fileURLToPath(new URL("../../extension", import.meta.url)), ext, { recursive: true });
+  // 0.3.0: no relay in this run, and never the live one's account endpoints: the relay address goes nowhere.
+  { const cfg = join(ext, "config.js"); writeFileSync(cfg, readFileSync(cfg, "utf8").replace(/export const RELAY_URL = ".*";/, 'export const RELAY_URL = "http://127.0.0.1:9";')); }
   const m = JSON.parse(readFileSync(join(ext, "manifest.json"), "utf8"));
   m.host_permissions = m.host_permissions.filter((h) => h !== "*://*.youtube.com/*");
   writeFileSync(join(ext, "manifest.json"), JSON.stringify(m));
@@ -49,7 +51,7 @@ try {
   await p.evaluate(`document.getElementById('start').click()`);
   await sleep(1000);
   check("H5: after Start, the welcome tab has a private-windows step with the exact toggle", /Allow in Private/.test(await p.evaluate(`document.getElementById('private-text').textContent`)));
-  check("M3: with Claude off, the done panel says nothing leaves the browser", /Nothing leaves this browser/.test(await p.evaluate(`document.getElementById('done-privacy').textContent`)));
+  check("M3: with Claude off, the done panel says plainly what the account keeps", /Finishing makes your Gatekeeper account|Your Gatekeeper account holds/.test(await p.evaluate(`document.getElementById('done-privacy').textContent`)));
   const sw = await connect((t) => t.type === "service_worker");
   const base = (await sw.evaluate(`chrome.runtime.getURL("")`)).replace(/\/$/, "");
 

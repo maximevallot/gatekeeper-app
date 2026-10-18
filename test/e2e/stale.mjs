@@ -20,6 +20,8 @@ process.on("exit", () => { try { browser.kill(); } catch {} (() => { try { rmSyn
 try {
   const ext = join(work, "extension");
   cpSync(join(repo, "extension"), ext, { recursive: true });
+  // 0.3.0: no relay in this run, and never the live one's account endpoints: the relay address goes nowhere.
+  { const cfg = join(ext, "config.js"); writeFileSync(cfg, readFileSync(cfg, "utf8").replace(/export const RELAY_URL = ".*";/, 'export const RELAY_URL = "http://127.0.0.1:9";')); }
   // The old worker runs its own old engine, as a worker started before the update does from memory, while
   // the pages load today's files.
   for (const f of ["hands/background.js", "hands/blocker.js", "engine/engine.js", "engine/catalog.js"]) {
