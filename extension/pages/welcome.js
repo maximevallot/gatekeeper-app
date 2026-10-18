@@ -41,7 +41,7 @@ $("skip-watch").addEventListener("click", () => {
 $("start-watch").addEventListener("click", async () => {
   $("start-watch").disabled = true;
   await ask("watch", { goal: $("watch-goal").value });
-  $("done-title").textContent = "You're watching";
+  $("done-title").textContent = "You're set";
   $("summary").textContent = "For the next 7 days nothing is blocked. Gatekeeper's toolbar button shows the time so far, and you can set limits early from there.";
   $("done-privacy").textContent = NOTHING_LEAVES;
   $("watch").classList.add("hidden");
@@ -112,7 +112,7 @@ if (new URLSearchParams(location.search).get("step") === "done") {
     const { state } = await ask("state");
     for (const id of ["watch", "ask"]) $(id).classList.add("hidden");
     if (document.getElementById("join-card")) $("join-card").classList.add("hidden");
-    $("done-title").textContent = state.watch && !state.watch.ended ? "You're watching" : "You're set";
+    $("done-title").textContent = "You're set";
     $("summary").textContent = Object.entries(state.rules.kinds).map(([k, v]) => `${label(k)}: ${minutesText(v.minutes)}`).join(". ") + (Object.keys(state.rules.kinds).length ? "." : "");
     $("done").classList.remove("hidden");
     checkPrivate();

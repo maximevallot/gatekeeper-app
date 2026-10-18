@@ -74,8 +74,8 @@ function videoChips(rules) {
 function pendingRow(kind, inForce, want) {
   const now = got.state.pending && got.state.pending.from;
   if (inForce && !want) {
-    return el("div", { class: "note", "data-pending": kind }, el("span", {}, `Stops being watched ${when(now)}`),
-      el("button", { class: "link", type: "button", onclick: () => keep(kind, inForce) }, "Keep watching"));
+    return el("div", { class: "note", "data-pending": kind }, el("span", {}, `Limit ends ${when(now)}`),
+      el("button", { class: "link", type: "button", onclick: () => keep(kind, inForce) }, "Keep the limit"));
   }
   const asking = got.state.pending && got.state.pending.ok === false;
   if (inForce && want && want.minutes !== inForce.minutes) {
@@ -164,7 +164,7 @@ function renderKinds() {
   const chips = !watched.includes("video") && videoChips(rules);
   if (chips) {
     rows.push(el("div", { class: "rowblock", "data-kind": "videos-only" },
-      el("div", { class: "stack" }, el("div", { class: "name" }, "YouTube videos"), el("div", { class: "sub" }, "Video isn't watched; these rules still apply.")),
+      el("div", { class: "stack" }, el("div", { class: "name" }, "YouTube videos"), el("div", { class: "sub" }, "Video has no limit; these rules still apply.")),
       chips));
   }
   const limited = [...new Set([...Object.keys(rules.siteLimits || {}), ...Object.keys(state.rules.siteLimits || {})])].sort();
@@ -175,7 +175,7 @@ function renderKinds() {
       b.addEventListener("click", () => { const r = wanted(); r.kinds[k] = { minutes: DEFAULT_MINUTES }; propose(r); });
       return i ? [", ", b] : [b];
     });
-    rows.push(el("div", { class: "row muted small" }, el("span", {}, "Not watched: ", ...links, ". Tap one to add it.")));
+    rows.push(el("div", { class: "row muted small" }, el("span", {}, "No limit: ", ...links, ". Tap one to add it.")));
   }
   rows.push(addSiteRow());
   $("kinds").replaceChildren(...rows);
@@ -416,7 +416,7 @@ async function load() {
   if (got.state.watch && !got.state.watch.ended && got.now < got.state.watch.until && !$("watch-note")) {
     const end = el("button", { class: "link", type: "button" }, "Set limits now");
     end.addEventListener("click", () => { location.href = "welcome.html?after=watch"; });
-    $("daily").before(el("div", { class: "note", id: "watch-note" }, el("span", {}, `Watch week until ${when(got.state.watch.until)}: nothing is blocked yet.`), end));
+    $("daily").before(el("div", { class: "note", id: "watch-note" }, el("span", {}, `Your first week, until ${when(got.state.watch.until)}: nothing is blocked yet.`), end));
   }
   if (!warned) warned = warnings({ ...got, incognito: true }, $("daily")) >= 0; // private windows: shown in Settings
   renderKinds();

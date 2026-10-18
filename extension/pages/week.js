@@ -12,7 +12,7 @@ async function show() {
   const first = date(w.days[0].day), last = date(w.days[6].day);
   $("range").textContent = `Your week · ${first.toLocaleDateString([], { day: "numeric", month: "short" })} to ${last.toLocaleDateString([], { day: "numeric", month: "short" })}`;
   $("total").textContent = hm(w.minutes);
-  $("allowed").textContent = w.allowed ? `on watched sites, of ${hm(w.allowed)} allowed` : "on watched sites";
+  $("allowed").textContent = w.allowed ? `on your limited sites, of ${hm(w.allowed)} allowed` : "on your limited sites";
   const perDay = Math.max(...w.days.map((d) => d.allowed || 0), 0);
   const top = Math.max(perDay, ...w.days.map((d) => d.minutes || 0), 1);
   $("limit-label").textContent = perDay ? `Limit ${perDay} a day` : "";
@@ -37,7 +37,7 @@ async function show() {
     $("ready").classList.remove("hidden");
     ask("watchShown").catch(() => {});
   }
-  if (state.watch && watching(state)) $("limit-label").textContent = "Watch week: nothing blocked";
+  if (state.watch && watching(state)) $("limit-label").textContent = "First week: nothing blocked";
   if (w.loosenAsked) {
     $("note").before(el("p", { class: "muted", id: "loosen-week" }, `You asked to loosen a rule ${w.loosenAsked} time${w.loosenAsked === 1 ? "" : "s"}; Gatekeeper agreed ${w.loosenAllowed === 0 ? "none" : w.loosenAllowed === w.loosenAsked ? "every time" : w.loosenAllowed + " of them"}.`));
   }

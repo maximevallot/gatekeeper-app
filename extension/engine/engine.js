@@ -997,7 +997,7 @@ export function describeChanges(cur, next) {
   const out = [];
   for (const k of new Set([...Object.keys(cur.kinds), ...Object.keys(next.kinds)])) {
     const a = cur.kinds[k], b = next.kinds[k];
-    if (a && !b) out.push({ kind: k, target: "kind:" + k, text: `${label(k)}: no longer watched` });
+    if (a && !b) out.push({ kind: k, target: "kind:" + k, text: `${label(k)}: limit removed` });
     else if (!a && b) out.push({ kind: k, target: "kind:" + k, text: `${label(k)}: ${minutesText(b.minutes)}` });
     else if (a.minutes !== b.minutes) out.push({ kind: k, target: "kind:" + k, text: `${label(k)}: ${minutesText(a.minutes)} → ${minutesText(b.minutes)}` });
   }

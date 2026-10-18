@@ -27,7 +27,7 @@ try {
     { stdio: "ignore" });
   const p = await connect((t) => t.type === "page" && t.url.endsWith("/pages/welcome.html"));
   await sleep(800);
-  check("the welcome tab still offers the watch week", /just watching/.test(await p.evaluate(`document.querySelector('#watch h1').textContent`)));
+  check("the welcome tab still offers the watch week", /a week to see where your time goes/.test(await p.evaluate(`document.querySelector('#watch h1').textContent`)));
   await p.evaluate(`document.getElementById('watch-first').click(); document.getElementById('watch-goal').value = 'Finish problem set 4'; document.getElementById('start-watch').click()`);
   await sleep(800);
   const sw = await connect((t) => t.type === "service_worker");
@@ -42,7 +42,7 @@ try {
   check("a watched site opens and is counted", (await p.evaluate("location.href")).startsWith("https://vimeo.com") && (s.usage.seconds.video || 0) >= 4, s.usage.seconds);
 
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(900);
-  check("Today shows the watch week", /Watch week · day 1 of 7/.test(await p.evaluate(`document.getElementById('mode').textContent`)));
+  check("Today shows the watch week", /First week · day 1 of 7/.test(await p.evaluate(`document.getElementById('mode').textContent`)));
   check("Today offers to set limits now", /Set limits now/.test(await p.evaluate(`document.getElementById('change').textContent`)));
 
   await p.send("Page.navigate", { url: base + "/pages/welcome.html?after=watch" }); await sleep(1000);

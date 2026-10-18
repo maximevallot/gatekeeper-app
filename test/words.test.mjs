@@ -27,3 +27,18 @@ test("What's sent says the video judge gets what the exam is for, and AI help is
   assert.match(WHATS_SENT.find((w) => w.what === "Video rules").sent, /in exam mode what your exam is for/);
   assert.equal(CONSENT.help, 5);
 });
+
+test("no shown text says watch, watched or watching: it reads as watching someone (Maxime, 2026-10-18)", async () => {
+  const bad = /(^|[^.\w$-])watch(ed|ing)?\b/i; // a word, not a property (t.watch) or an id (watch-goal)
+  for (const f of readdirSync(dir).filter((x) => /\.(html|js)$/.test(x))) {
+    const src = code(readFileSync(new URL(f, dir), "utf8"));
+    // HTML: the text between tags. JS: string literals with a space in them (sentences, not ids or keys).
+    const texts = f.endsWith(".html")
+      ? [...src.matchAll(/>([^<]+)</g)].map((m) => m[1])
+      : src.split("\n").flatMap((line) => [...line.matchAll(/"([^"]*\s[^"]*)"|`([^`]*\s[^`]*)`|'([^']*\s[^']*)'/g)].map((m) => m[1] || m[2] || m[3]));
+    const hits = texts.map((t) => t.replace(/\$\{[^}]*\}/g, "")).filter((t) => bad.test(t) && !/youtube\.com\/watch|\?v=/.test(t));
+    assert.deepEqual(hits, [], f);
+  }
+  const { describeChanges } = await import("../extension/engine/engine.js");
+  assert.deepEqual(describeChanges({ kinds: { social: { minutes: 20 } } }, { kinds: {} }).map((c) => c.text), ["Social media: limit removed"]);
+});

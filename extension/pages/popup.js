@@ -42,7 +42,7 @@ async function show() {
   // A ring per watched kind, then one per site with its own limit (one closed only in exam mode shows in exam mode).
   const rings = [...t.kinds, ...(t.sites || []).filter((k) => k.minutes !== null || k.exam)];
   $("rings").replaceChildren(...(rings.length ? rings.map((k) => ring(k, t.reopensAt))
-    : [el("p", { class: "lead", style: "grid-column: 1 / -1" }, "Nothing is watched yet.")]));
+    : [el("p", { class: "lead", style: "grid-column: 1 / -1" }, "No limits yet.")]));
   $("goal").textContent = t.goal;
   $("goal-card").classList.toggle("hidden", !t.goal);
   $("exam-box").classList.toggle("hidden", !!t.exam);
@@ -86,7 +86,7 @@ async function show() {
 
 // The watch week: minutes so far per kind, nothing blocked, and one tap to set limits now.
 function showWatch(t) {
-  $("mode").textContent = `Watch week · day ${t.watch.day} of ${t.watch.of}`;
+  $("mode").textContent = `First week · day ${t.watch.day} of ${t.watch.of}`;
   $("mode").className = "pill ok";
   const top = Math.max(30, ...t.watch.kinds.map((k) => k.used));
   $("rings").replaceChildren(...t.watch.kinds.slice(0, 6).map((k) => el("div", { class: "ring", "data-kind": k.kind },
