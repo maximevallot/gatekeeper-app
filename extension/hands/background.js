@@ -272,14 +272,18 @@ async function judgeVideo(key) {
     let rule = req.local ?? null, by = "words";
     if (req.payload) {
       const r = await callRelay("/judge", req.payload);
-      if (r.ok && r.data.judged === true) {
+      if (req.exam && r.ok && typeof r.data.forExam === "boolean") {
+        // In exam mode: about the exam's subject or not (the relay's forExam).
+        rule = r.data.forExam ? "exam" : null;
+        by = "claude";
+      } else if (!req.exam && r.ok && r.data.judged === true) {
         rule = r.data.rule;
         by = "claude";
       } else {
         rule = req.fallback; // the relay could not judge: the words decide
       }
     }
-    await update((s) => ({ state: engine.recordJudgment(s, key, rule, by, Date.now()) }));
+    await update((s) => ({ state: engine.recordJudgment(s, key, rule, by, Date.now(), { exam: !!req.exam }) }));
     tick(); // a video that is now closed goes to the gate at once
   } finally {
     judgingNow.delete(key);

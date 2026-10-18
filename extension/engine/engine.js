@@ -50,7 +50,7 @@ export const MAX_ALLOWED_VIDEOS = 50; // judged videos given a rule of their own
 
 // The version of each consent text. Raise one when what that switch sends changes: the user is asked again.
 // talk: the gate. sorting: unknown sites. chat: the rules chat. judge: video rules judged by Claude.
-export const CONSENT = { talk: 1, sorting: 1, chat: 2, judge: 1, help: 4 };
+export const CONSENT = { talk: 1, sorting: 1, chat: 2, judge: 2, help: 5 }; // judge 2, help 5: exam mode's goal goes to the video judge
 
 // "Claude help": one yes for everything below. Raise CONSENT.help whenever this list changes, so the user is
 // asked again. The pages show this list, word for word, before the first request.
@@ -59,7 +59,7 @@ export const WHATS_SENT = [
   { what: "The gate", sent: "the site's name (not its address) and kind, today's minutes and budget for that kind, your goal sentence, exam mode if it's on, the titles and dates of your next few calendar events if you connected a calendar, and what you type", when: "when you ask the gate for time" },
   { what: "Changing rules by talking", sent: "what you type, the last six messages of your talk with Gatekeeper, your rules (no usage), exam mode if it's on, the date and time, and whether a calendar is connected and when it was last read (never its link or events)", when: "when you send a message" },
   { what: "Asking to loosen a rule", sent: "the change in words, your goal sentence, and your reason as you type it", when: "when you loosen a rule or end exam mode early" },
-  { what: "Video rules", sent: "a YouTube video's title and channel, and the wording of your video rules", when: "once per video you open, when you have video rules" },
+  { what: "Video rules", sent: "a YouTube video's title and channel, the wording of your video rules, and in exam mode what your exam is for", when: "once per video you open, when you have video rules or exam mode is on" },
   { what: "Sorting new sites", sent: "the site's name and page title", when: "once per site Gatekeeper doesn't know, after a minute on it" },
 ];
 export const SENT_TO = "Each request also carries a random install number. It goes to Gatekeeper's relay, which asks Anthropic's Claude and keeps none of it. Nothing else leaves this browser: never page content, addresses, or other tabs. Your talk with Gatekeeper and your calendar link are kept on this device. When this computer's clock jumps, Gatekeeper asks its relay for the time, with nothing sent along.";
@@ -540,6 +540,8 @@ export function decide(state, { url, title = "", now }) {
     // not, sites sorted as work or other, and sites not sorted yet. A video rule that makes videos free still holds.
     const video = videoDecision(s, url, title);
     if (video && video.verdict === "allow" && !video.watched) return video;
+    // A video about the exam's subject plays, for the whole video (tester case, 2026-10-18).
+    if (examVideoOn(s, url)) return { verdict: "allow", kind: kindOf(s, url), watched: false, study: true, studyVideo: true };
     if (lim) return siteDecision(s, url, title, lim);
     const kind = kindOf(s, url);
     // Study sites and search result pages stay open (Maxime's tester run, 2026-10-18): exam mode never strands a
@@ -679,8 +681,49 @@ function videoDecision(s, url, title) {
   return { ...d, verdict: used >= v.minutes * 60 ? "gate" : "allow" };
 }
 
+// ---------- study videos in exam mode (tester case, 2026-10-18) ----------
+// In exam mode a YouTube video about the exam's subject plays, with no talk at the gate. Each video is judged once
+// against the exam's goal ("stats exam"), as a video rule would be: by AI help through /judge (one rule, id "exam"),
+// or by the goal's words in the title on this device. Watch pages only: never YouTube's home feed, Shorts or
+// comments. It plays for the whole video, with no pass to run out; only while exam mode is on.
+
+const GOAL_STOP = new Set(["exam", "exams", "midterm", "midterms", "final", "finals", "quiz", "test", "tests", "for", "the", "and",
+  "my", "mode", "study", "studying", "class", "course", "prep", "review", "of", "in", "on", "to", "an", "partiel", "examen"]);
+
+/** The goal's own words, for matching titles without AI help: "stats exam" → ["stats"]. */
+export function goalWords(goal) {
+  return [...new Set(String(goal || "").toLowerCase().split(/[^a-z0-9.]+/).filter((w) => w.length >= 3 && !GOAL_STOP.has(w)))].slice(0, 12);
+}
+
+/** A video's key on a watch page (youtube.com/watch, youtu.be), or null: Shorts and live pages are not study. */
+export function examVideoKey(url) {
+  const key = videoKeyOf(url);
+  if (!key) return null;
+  try {
+    const u = new URL(url);
+    return u.pathname === "/watch" || matches(u.hostname, "youtu.be") ? key : null;
+  } catch { return null; }
+}
+
+const examGoalKey = (s) => "exam:" + ((s.rules.exam && s.rules.exam.goal) || "");
+function examRule(s) {
+  const goal = (s.rules.exam && s.rules.exam.goal) || "";
+  return { id: "exam", site: "youtube.com", about: goal || "the subject of the exam", except: "", words: { match: goalWords(goal), except: [] } };
+}
+
+/** Whether this watch page, in exam mode, has been judged on topic for the exam's goal. */
+function examVideoOn(s, url) {
+  const key = examVideoKey(url);
+  const j = key && (s.examJudged || {})[key];
+  return !!(j && j.goal === examGoalKey(s) && j.on);
+}
+
 /** Whether this page is a video that a video rule may apply to and that has no judgment yet. */
 export function needsJudgment(state, url) {
+  if (examOn(state) && examVideoKey(url)) {
+    const j = (state.examJudged || {})[examVideoKey(url)];
+    return !j || j.goal !== examGoalKey(state);
+  }
   const key = videoKeyOf(url), site = videoSiteOf(url);
   if (!key || !site) return false;
   const rules = videoRules(state, site);
@@ -696,20 +739,30 @@ export function needsJudgment(state, url) {
  */
 export function judgeRequest(state, key, { title = "", channel = "" }) {
   const site = "youtube.com";
-  const rules = videoRules(state, site);
+  const exam = examOn(state);
+  // In exam mode the video is judged against the exam (the relay's /judge reads `exam` and answers `forExam`); on
+  // this device, by the goal's words. The student's own video rules go along as usual.
+  const rules = exam ? [examRule(state)] : videoRules(state, site);
   const t = String(title).replace(/\s+/g, " ").trim().slice(0, 200);
   const c = String(channel).replace(/\s+/g, " ").trim().slice(0, 100);
   if (!rules.length) return { local: null };
-  if (!consented(state, "judge") || !t) return { local: matchWords(rules, { title: t, channel: c }) };
+  if (!consented(state, "judge") || !t) return { local: matchWords(rules, { title: t, channel: c }), exam };
+  const sent = (exam ? videoRules(state, site) : rules).map(({ id, about, except }) => ({ id, about, except }));
   return {
-    payload: { installId: state.installId, site, title: t, channel: c, rules: rules.map(({ id, about, except }) => ({ id, about, except })) },
-    fallback: matchWords(rules, { title: t, channel: c }),
+    payload: { installId: state.installId, site, title: t, channel: c, rules: sent, ...(exam ? { exam: examForRelay(state) } : {}) },
+    fallback: matchWords(rules, { title: t, channel: c }), exam,
   };
 }
 
 /** Keep which rule a video falls under (null: none), under the rules' present wording. */
-export function recordJudgment(state, key, rule, by, now) {
+export function recordJudgment(state, key, rule, by, now, { exam = false } = {}) {
   const t = Math.max(Number(now) || 0, (state.clock && state.clock.floor) || 0);
+  if (exam) {
+    // Judged against the exam's goal: on topic plays; kept per goal, so another exam is judged again.
+    const examJudged = { ...(state.examJudged || {}), [key]: { on: rule === "exam", goal: examGoalKey(state), by, at: t } };
+    const { [key]: _, ...judging } = state.judging || {};
+    return { ...state, examJudged: Object.fromEntries(Object.entries(examJudged).sort((a, b) => b[1].at - a[1].at).slice(0, MAX_JUDGED)), judging };
+  }
   const rules = videoRules(state, "youtube.com");
   const ok = rule === null || rules.some((v) => v.id === rule);
   const { [key]: _, ...judging } = state.judging || {};
@@ -803,6 +856,11 @@ export function enforcement(state, now, { withheld = [], seeAll = false } = {}) 
   // its minutes could not be counted. A free video can be, since nothing is counted there.
   const youtubeBlind = blind.some((d) => d === "youtube.com" || d === "youtu.be");
   const allowVideos = [], closeVideos = [];
+  if (examOn(s)) {
+    for (const [key, j] of Object.entries(s.examJudged || {}).sort((a, b) => b[1].at - a[1].at)) {
+      if (j.on && j.goal === examGoalKey(s)) allowVideos.push(key);
+    }
+  }
   const recent = Object.entries(s.judged || {}).sort((a, b) => b[1].at - a[1].at);
   for (const [key, j] of recent) {
     if (!j.rule) continue;
@@ -1131,6 +1189,8 @@ export function gateRequest(state, { url, message, now }) {
       minutesUsed: Math.min(d.usedMinutes || 0, 1440), budget: d.budgetMinutes ?? 0, deadlines: deadlines(s, t),
       // In exam mode the gate gives a pass only for a page that serves the exam (shared names, one-model step 1).
       exam: examForRelay(s), now: localIso(t),
+      // The gate's own question, when this message answers it: with it the relay decides, allow or deny (tester case).
+      ...(((s.followUps || {})[d.ladder] || 0) > t && (s.gateAsked || {})[d.ladder] ? { asked: s.gateAsked[d.ladder].q.slice(0, 300) } : {}),
       message: text.slice(0, MAX_MESSAGE),
     },
   };
@@ -1168,12 +1228,18 @@ export function applyGateAnswer(state, { url, answer, now }) {
     s = { ...s, log: logEvent(s, "pass", { site: e.domain, kind, minutes, exam: examOn(s) || undefined }) };
     return { state: s, result: { decision: "allow", minutes, site: e.domain, reply: answer.reply } };
   }
-  if (answer.decision === "ask" && !((s.followUps || {})[kind] > t)) {
-    s = { ...s, followUps: { ...(s.followUps || {}), [kind]: t + FOLLOW_UP_MS } };
-    return { state: s, result: { decision: "ask", reply: answer.reply } };
+  if (answer.decision === "ask") {
+    // One question; the answer to it is decided by the relay (it is sent the question as `asked`). Should a second
+    // question come anyway, it is shown and answered once more, never turned into a no without a word; a third is a no.
+    const n = ((s.followUps || {})[kind] > t && (s.gateAsked || {})[kind] ? s.gateAsked[kind].n : 0) + 1;
+    if (n <= 2) {
+      s = { ...s, followUps: { ...(s.followUps || {}), [kind]: t + FOLLOW_UP_MS }, gateAsked: { ...(s.gateAsked || {}), [kind]: { q: answer.reply.slice(0, 300), n } } };
+      return { state: s, result: { decision: "ask", reply: answer.reply } };
+    }
   }
   const until = t + COOLDOWN_MS;
-  s = { ...s, followUps, cooldowns: { ...(s.cooldowns || {}), [kind]: until } };
+  const { [kind]: _asked, ...gateAsked } = s.gateAsked || {};
+  s = { ...s, followUps, gateAsked, cooldowns: { ...(s.cooldowns || {}), [kind]: until } };
   s = { ...s, log: logEvent(s, "gate.no", { site: e.domain, kind }) };
   return { state: s, result: { decision: "deny", until, reply: answer.reply } };
 }

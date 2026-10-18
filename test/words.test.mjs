@@ -21,3 +21,9 @@ test("the engine's lines to the user say \"AI help\", and only What's sent names
   const { SENT_TO } = await import("../extension/engine/engine.js");
   assert.match(SENT_TO, /Anthropic's Claude/);
 });
+
+test("What's sent says the video judge gets what the exam is for, and AI help is asked again for it", async () => {
+  const { WHATS_SENT, CONSENT } = await import("../extension/engine/engine.js");
+  assert.match(WHATS_SENT.find((w) => w.what === "Video rules").sent, /in exam mode what your exam is for/);
+  assert.equal(CONSENT.help, 5);
+});

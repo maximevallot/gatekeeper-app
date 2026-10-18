@@ -18,6 +18,8 @@ function answer(raw) {
   }
   if (body.system?.includes("You judge single videos")) {
     const title = /<title>(.*)<\/title>/.exec(user)?.[1] ?? "";
+    // Exam mode (the relay sends "exam mode: on, for ..."): about the exam's subject or not.
+    if (/exam mode: on/.test(user)) return { rule: "none", forExam: /stat|regression|econometric/i.test(title) };
     if (/lecture|explained|tutorial/i.test(title)) return { rule: /- id: (v\d+)\n  about: educational/.exec(user)?.[1] ?? "none" };
     if (/minecraft|fortnite|gameplay/i.test(title)) return { rule: /- id: (v\d+)\n  about: video games/.exec(user)?.[1] ?? "none" };
     return { rule: "none" };

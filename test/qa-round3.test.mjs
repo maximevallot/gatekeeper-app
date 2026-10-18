@@ -211,3 +211,36 @@ test("tester run, #7: 15 → 10 → \"actually no, 20\" within ten minutes: back
   const ap = applyCard(rec, SAT + 61e3);
   assert.equal(ap.state.rules.kinds.video.minutes, 15);
 });
+
+test("tester case, 1 and 3: in exam mode a stats video plays for the whole video, with no talk; others stay closed", async () => {
+  const { judgeRequest, recordJudgment, needsJudgment, enforcement, goalWords } = await import("../extension/engine/engine.js");
+  let s = startExam(setUp({ video: 20 }), { until: SAT + 2 * 86400e3, goal: "Stats exam" }, SAT).state;
+  const STATS = "https://www.youtube.com/watch?v=STATSvid001", CATS = "https://www.youtube.com/watch?v=CATSvid0001";
+  assert.deepEqual(goalWords("Stats exam"), ["stats"]);
+  assert.equal(needsJudgment(s, STATS), true, "each watch page is judged once in exam mode");
+  assert.equal(needsJudgment(s, "https://www.youtube.com/shorts/STATSvid001"), false, "not Shorts");
+  assert.equal(needsJudgment(s, "https://www.youtube.com/"), false, "not the home feed");
+  // With AI help: one rule, the exam's goal, through /judge.
+  const req = judgeRequest(s, "yt:STATSvid001", { title: "Linear regression, clearly explained", channel: "StatQuest" });
+  assert.equal(req.exam, true);
+  assert.deepEqual(req.payload.exam.goal, "Stats exam", "the relay's /judge reads exam and answers forExam");
+  assert.deepEqual(req.payload.rules, [], "the student's own video rules, none here");
+  s = recordJudgment(s, "yt:STATSvid001", "exam", "claude", SAT + 60e3, { exam: true });
+  s = recordJudgment(s, "yt:CATSvid0001", null, "claude", SAT + 60e3, { exam: true });
+  assert.equal(decide(s, { url: STATS, now: SAT + 61e3 }).verdict, "allow", "on topic: it plays");
+  assert.equal(decide(s, { url: CATS, now: SAT + 61e3 }).verdict, "block", "off topic: closed as before");
+  assert.equal(decide(s, { url: "https://www.youtube.com/", now: SAT + 61e3 }).verdict, "block", "the home feed stays closed");
+  assert.ok(enforcement(s, SAT + 61e3).allowVideos.includes("yt:STATSvid001"), "loaded directly, before the page closes");
+  // The whole video: an hour on it later, still open, and no pass was used.
+  for (let i = 1; i <= 720; i++) s = tick(s, { url: STATS, focused: true, active: true, seconds: 5, now: SAT + 61e3 + i * 5000 }).state;
+  assert.equal(decide(s, { url: STATS, now: SAT + 3700e3 }).verdict, "allow");
+  assert.deepEqual(s.usage.passes, {});
+  // Without AI help: the goal's words against the title, on this device.
+  const off = startExam(setUp({ video: 20 }, false), { until: SAT + 86400e3, goal: "stats exam" }, SAT).state;
+  assert.equal(judgeRequest(off, "yt:x", { title: "Stats 110: Lecture 1", channel: "Harvard" }).local, "exam");
+  assert.equal(judgeRequest(off, "yt:y", { title: "Minecraft speedrun", channel: "x" }).local, null);
+  // Only while exam mode is on.
+  const after = rollover(s, SAT + 3 * 86400e3);
+  assert.equal(examOn(after), false);
+  assert.equal(decide(after, { url: STATS, now: SAT + 3 * 86400e3 }).studyVideo, undefined);
+});

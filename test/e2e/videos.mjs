@@ -37,6 +37,8 @@ const VIDEOS = {
   GAMEvid0001: { title: "I played Minecraft for 100 days", channel: "SomeGamer" },
   LECTvid0001: { title: "Minecraft redstone computer explained", channel: "MIT OpenCourseWare" },
   MUSICvid001: { title: "Lo-fi beats to study to", channel: "Chill Radio" },
+  STATSvid001: { title: "Econometrics 3: regression, clearly explained", channel: "Stats Lab" },
+  CATSvid0001: { title: "Funny cats compilation", channel: "Pets" },
 };
 const watch = (id) => `https://www.youtube.com/watch?v=${id}`;
 
@@ -216,6 +218,28 @@ try {
   await p.evaluate(`document.getElementById('reason-drop').click()`); await sleep(1200);
   s = await st();
   check("Drop this change: nothing loosens, nothing waits", !s.loosen && s.rules.kinds.games.minutes === 15 && !s.pending, { loosen: s.loosen, pending: s.pending, games: s.rules.kinds.games });
+
+  // The tester's case (2026-10-18): exam mode for a stats exam. A stats video plays with no talk at the gate, for the
+  // whole video; a cat video goes to the gate; there, the answer to the gate's one question is decided.
+  await p.send("Page.navigate", { url: rulesUrl }); await sleep(1000);
+  await p.evaluate(`chrome.runtime.sendMessage({ type: "startExam", until: Date.now() + 86400e3, goal: "Stats exam", source: "rules" })`);
+  await sleep(1500);
+  await p.send("Page.navigate", { url: watch("STATSvid001") });
+  for (let i = 0; i < 12 && !(await p.evaluate("location.href")).startsWith(watch("STATSvid001")); i++) await sleep(1000);
+  await sleep(4000);
+  s = await st();
+  check("exam mode: a stats video plays, judged against the exam's goal", (await p.evaluate("location.href")).startsWith(watch("STATSvid001")) && s.examJudged?.["yt:STATSvid001"]?.on === true, { href: await p.evaluate("location.href"), j: s.examJudged });
+  check("and no pass was used for it", !s.passes["youtube.com"] && !Object.values(s.usage.passes || {}).length, { passes: s.passes, used: s.usage.passes });
+  await p.send("Page.navigate", { url: watch("CATSvid0001") });
+  for (let i = 0; i < 12 && !(await p.evaluate("location.href")).includes("/pages/gate.html"); i++) await sleep(1000);
+  await sleep(3000);
+  check("exam mode: a cat video stays closed", (await p.evaluate("location.href")).includes("/pages/gate.html"), await p.evaluate("location.href"));
+  const gateTalk = async (text) => { await p.evaluate(`document.getElementById('message').value = ${JSON.stringify(text)}; document.getElementById('form').requestSubmit();`); await sleep(2500); };
+  await gateTalk("I need it for my class");
+  await gateTalk("econometrics class, really");
+  const followUp = mock.requests.filter((r) => r.body.system && !/You (sort|judge|change|hold)/.test(r.body.system)).at(-1);
+  check("the gate's follow-up carries its own question, so it is decided", /the gate already asked/.test(followUp.body.messages[0].content), followUp.body.messages[0].content.slice(0, 400));
+  check("and it ends in a decision, not another question", /stays shut|Opening/.test(await p.evaluate(`document.getElementById('closed').innerText`)));
 
   // Turning judging off forgets what Claude judged.
   await p.send("Page.navigate", { url: rulesUrl }); await sleep(1200);
