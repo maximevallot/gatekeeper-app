@@ -7,7 +7,9 @@ const m = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.m
 
 test("the extension may act only on the catalog's sites; anything else is asked for, one site at a time", () => {
   assert.deepEqual(m.host_permissions, [...catalogPatterns(), relayPattern()], "run node scripts/sync-manifest.mjs");
-  assert.equal(relayPattern(), "https://gatekeeper-relay.mvallot22.workers.dev/*");
+  assert.equal(relayPattern(), "https://gatekeeper-relay-staging.mvallot22.workers.dev/*", "0.3.0 talks to the staging relay only");
+  assert.equal(m.version, "0.3.0");
+  assert.equal(m.name, "Gatekeeper 0.3 (test)", "so it can't be taken for the testers' build");
   assert.deepEqual(m.optional_host_permissions, ["*://*/*"]);
   assert.ok(m.host_permissions.includes("*://*.agar.io/*"));
   assert.ok(m.host_permissions.includes("*://*.youtube-nocookie.com/*"), "QA round 2, H5: the privacy-mode YouTube player");

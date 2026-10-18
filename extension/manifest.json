@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Gatekeeper",
-  "version": "0.2.0",
+  "name": "Gatekeeper 0.3 (test)",
+  "version": "0.3.0",
   "description": "A daily budget for each kind of site that pulls you away. Loosening a rule waits until the next morning.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -94,7 +94,7 @@
     "*://*.uniqlo.com/*",
     "*://*.wayfair.com/*",
     "*://*.zalando.com/*",
-    "https://gatekeeper-relay.mvallot22.workers.dev/*"
+    "https://gatekeeper-relay-staging.mvallot22.workers.dev/*"
   ],
   "optional_permissions": [
     "nativeMessaging"
