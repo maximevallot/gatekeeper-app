@@ -81,6 +81,8 @@ test("the snapshot follows the contract, with what the engine decided", () => {
   assert.equal(snap.type, "snapshot");
   assert.equal(snap.v, 1);
   assert.equal(snap.extensionId, "kfikbbdocggfgfhaegkgkfomhmacdbjp");
+  // Safari's address is not built from an ID, so the snapshot carries the base the pages are relative to.
+  assert.equal(snapshot(s, MON + 2000, { base: "safari-web-extension://1A2B/" }).base, "safari-web-extension://1A2B/");
   assert.deepEqual(snap.pages, { today: "pages/popup.html", rules: "pages/rules.html", talk: "pages/talk.html", week: "pages/week.html", exam: "pages/rules.html#exam" });
   assert.equal(snap.reopensAt, at("2026-10-20T04:00:00-04:00"));
   assert.equal(snap.goal, "Finish problem set 4");

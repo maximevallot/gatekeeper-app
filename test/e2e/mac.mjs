@@ -70,7 +70,7 @@ try {
   let snaps = snapshots();
   const first = snaps[snaps.length - 1] || {};
   check("a snapshot reached the bridge", snaps.length >= 1, snaps.length);
-  check("it follows the contract", first.type === "snapshot" && first.v === 1 && first.extensionId === id && first.pages.talk === "pages/talk.html"
+  check("it follows the contract", first.type === "snapshot" && first.v === 1 && first.extensionId === id && first.base === `chrome-extension://${id}/` && first.pages.talk === "pages/talk.html"
     && first.pages.exam === "pages/rules.html#exam" && first.goal === "Finish problem set 4" && first.reopensAt > Date.now() && first.exam === null && first.waiting === false, first);
   const k = (first.kinds || [])[0] || {};
   check("with each watched kind and what the engine decided", first.kinds.length === 1 && k.kind === "social" && k.short === "Social" && k.minutes === 15 && k.left === 15 && k.status === "open" && k.fraction > 0.99, first.kinds);

@@ -100,7 +100,7 @@ async function macExchange(force) {
     macStatus = { connected: false, error: "reload_needed" };
     return;
   }
-  const snap = engine.snapshot(state, Date.now(), { extensionId: chrome.runtime.id });
+  const snap = engine.snapshot(state, Date.now(), { extensionId: chrome.runtime.id, base: chrome.runtime.getURL("") });
   const key = engine.snapshotKey(snap);
   if (!force && key === macSent) return;
   macSent = key;
@@ -177,7 +177,9 @@ async function tick() {
   const audible = (await chrome.tabs.query({ audible: true }))
     .filter((t) => t.url && /^https?:/.test(t.url) && !(tab && t.id === tab.id)).map((t) => t.url);
   // A video playing counts as being there, even with hands off the keyboard.
-  const active = (await chrome.idle.queryState(IDLE_SECONDS)) === "active" || !!(tab && tab.audible);
+  // Safari has no chrome.idle: there, a focused window counts as the user being there (tick also needs focus).
+  const present = chrome.idle ? (await chrome.idle.queryState(IDLE_SECONDS)) === "active" : true;
+  const active = present || !!(tab && tab.audible);
   const out = await update((s) => engine.tick(s, { url: front || "", title: (tab && tab.title) || "", focused, active, seconds, now, audible }));
   if (!front) {
     badge(blind.length ? "!" : "");

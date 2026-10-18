@@ -1166,11 +1166,12 @@ export const MAC_PAGES = { today: "pages/popup.html", rules: "pages/rules.html",
  * Today, for Gatekeeper for Mac: todaySummary() as is (each watched kind with what the engine decided:
  * left, status, fraction), plus who sent it, the pages, and exam mode. The Mac shows status as sent.
  */
-export function snapshot(state, now, { extensionId } = {}) {
+export function snapshot(state, now, { extensionId, base } = {}) {
   const s = rollover(state, now);
   const today = todaySummary(s, now);
   return {
-    ...today, type: "snapshot", v: 1, at: s.clock.floor, extensionId, pages: MAC_PAGES,
+    // base: the extension's own address ("safari-web-extension://<uuid>/" in Safari), which pages are relative to.
+    ...today, type: "snapshot", v: 1, at: s.clock.floor, extensionId, base, pages: MAC_PAGES,
     exam: today.exam ? { until: today.exam.until, goal: today.exam.goal } : null,
   };
 }
