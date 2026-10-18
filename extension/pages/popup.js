@@ -50,7 +50,11 @@ async function show() {
   $("offer").classList.toggle("hidden", !t.offer);
   if (t.offer) {
     const when = new Date(t.offer.start).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
-    $("offer-text").textContent = `${t.offer.title}, ${when}. Start exam mode until then? ` + (seeAll ? "" : EVERY_SITE_LINE);
+    $("offer-text").textContent = `${t.offer.title}, ${when}. Start exam mode until then?`;
+    // Before the browser's all-sites prompt, one plain line on why (tester run, #4).
+    const line = document.getElementById("offer-access") || el("div", { class: "small muted", id: "offer-access" });
+    line.textContent = seeAll ? "" : EVERY_SITE_LINE;
+    $("offer-text").after(line);
     // The offered event is the exam: its start is fixed as exam mode's own time (QA round 3, N1).
     $("offer-start").onclick = async () => { await askEverySite(); await ask("startExam", { until: t.offer.start, at: t.offer.start, goal: t.offer.title, source: "calendar" }); show(); };
     $("offer-no").onclick = async () => { await ask("dismissOffer", { offer: t.offer }); show(); };
