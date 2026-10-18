@@ -10,6 +10,8 @@
 // allowVideos (priority 3, top-level pages): a YouTube video a video rule lets through, loaded directly
 //   while YouTube itself is closed. closeVideos (priority 2): a video a video rule closes, sent to the gate
 //   before it loads. Videos opened from inside YouTube never load a page; the tick catches those.
+// examAll (exam mode, with access to every site): every page to the gate at priority 1, study sites and passes
+//   allowed at priority 3.
 // allowSites (priority 3, pages and frames): a site with its own limit and time left inside a closed domain
 //   (cooking.nytimes.com while News is closed), since its time counts against nothing else.
 
@@ -31,9 +33,16 @@ export function videoFilters(key) {
   return [`||youtube.com/watch?v=${id}^`, `||youtube.com/watch?*&v=${id}^`, `||youtube.com/shorts/${id}^`, `||youtube.com/live/${id}^`, `||youtu.be/${id}^`];
 }
 
-export function buildRules({ redirect = [], block = [], allowVideos = [], closeVideos = [], allowSites = [] }, gatePage) {
+export function buildRules({ redirect = [], block = [], allowVideos = [], closeVideos = [], allowSites = [], examAll = null }, gatePage) {
   let id = 1;
   const rules = [];
+  if (examAll) {
+    // Exam mode, where Gatekeeper may see every site: every page goes to the gate (priority 1, under every other
+    // rule), except study sites and sites with a pass (priority 3).
+    rules.push({ id: id++, priority: 1, action: { type: "redirect", redirect: { regexSubstitution: gatePage + "#\\0" } },
+      condition: { regexFilter: "^https?://.*", resourceTypes: ["main_frame"] } });
+    if (examAll.allow.length) rules.push({ id: id++, priority: 3, action: { type: "allow" }, condition: { requestDomains: examAll.allow, resourceTypes: ["main_frame"] } });
+  }
   if (allowSites.length) {
     rules.push({ id: id++, priority: 3, action: { type: "allow" }, condition: { requestDomains: allowSites, resourceTypes: ["main_frame", "sub_frame"] } });
   }

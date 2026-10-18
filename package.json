@@ -12,6 +12,7 @@
     "e2e:watch": "node test/e2e/watch.mjs",
     "e2e:mac": "node test/e2e/mac.mjs",
     "e2e:loosen": "node test/e2e/loosen.mjs",
-    "e2e:calendar": "node test/e2e/calendar.mjs"
+    "e2e:calendar": "node test/e2e/calendar.mjs",
+    "e2e:access": "node test/e2e/access.mjs"
   }
 }

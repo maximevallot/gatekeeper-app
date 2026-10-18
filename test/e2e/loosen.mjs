@@ -1,6 +1,7 @@
 // npm run e2e:loosen — the agent's key to loosening, against the real relay Worker under `wrangler dev`
-// with a fake Anthropic API, in a throwaway headless Brave: a no keeps the rule until tomorrow, one question
-// then a yes waits for the morning, and with the relay gone a loosening waits for the morning as before.
+// with a fake Anthropic API, in a throwaway headless Brave: one question then a yes waits for the morning, a
+// second request asks only about itself and its no keeps the first, a no locks loosening until tomorrow, and
+// with the relay gone nothing loosens (QA round 2).
 // Needs ~/gatekeeper-relay (with /loosen) and RELAY_PORT free (default 8798).
 import { spawn } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -57,37 +58,41 @@ try {
   const card = () => p.evaluate(`!document.getElementById('loosen-card').classList.contains('hidden')`);
   const reason = async (text) => { await p.evaluate(`document.getElementById('loosen-message').value = ${JSON.stringify(text)}; document.getElementById('loosen-form').requestSubmit();`); await sleep(2500); };
 
-  // 1. A no keeps the rule, and the same request waits until tomorrow.
+  // 1. One question, then a yes: it waits for the morning.
   await plus("video", 2);
   let s = await st();
   check("a loosening with Claude help on asks for a reason", (await card()) && s.pending && s.pending.ok === false && s.rules.kinds.video.minutes === 15, s.pending);
   check("the card names the change", /Video: 15 min a day → 25 min a day/.test(await p.evaluate(`document.getElementById('loosen-changes').textContent`)));
-  await reason("I just want more");
-  s = await st();
-  check("a no keeps the rule", !s.pending && s.rules.kinds.video.minutes === 15 && /ask again tomorrow/.test(await p.evaluate(`document.getElementById('saved').textContent`)), { pending: s.pending, saved: await p.evaluate(`document.getElementById('saved').textContent`) });
-  await plus("video", 2);
-  check("the same request waits until tomorrow", /said no to that today/.test(await p.evaluate(`document.getElementById('saved').textContent`)) && !(await st()).pending);
-
-  // 2. One question, then a yes: it waits for the morning.
-  await plus("video", 3);
   await reason("It's for school");
   check("a vague reason gets one question", /What changed for school/.test(await p.evaluate(`document.getElementById('loosen-log').textContent`)) && (await card()));
   await reason("Two lecture recordings a day for 15.390 now");
   s = await st();
-  check("a real reason gets a yes that waits for the morning", s.pending && s.pending.ok === true && s.pending.from === s.usage.endsAt && s.rules.kinds.video.minutes === 15 && s.pending.rules.kinds.video.minutes === 30, s.pending);
+  check("a real reason gets a yes that waits for the morning", s.pending && s.pending.ok === true && s.pending.from === s.usage.endsAt && s.rules.kinds.video.minutes === 15 && s.pending.rules.kinds.video.minutes === 25, s.pending);
 
-  // 3. With the relay gone, a loosening works as before: it waits for the morning.
+  // 2. A second loosening asks only about itself (QA round 2, #12); its no keeps the approved one.
+  await plus("video", 1);
+  check("the second request names only what is new", /Video: 25 min a day → 30 min a day/.test(await p.evaluate(`document.getElementById('loosen-changes').textContent`)));
+  await reason("I just want more");
+  s = await st();
+  check("a no keeps the approved change for the morning", s.pending && s.pending.ok === true && s.pending.rules.kinds.video.minutes === 25 && s.rules.kinds.video.minutes === 15
+    && /ask again tomorrow/.test(await p.evaluate(`document.getElementById('saved').textContent`)), { pending: s.pending, saved: await p.evaluate(`document.getElementById('saved').textContent`) });
+  // 3. After a no, no other loosening is asked until the morning (#11): not one more step either.
+  await plus("video", 1);
+  s = await st();
+  check("after a no, one step more is refused until tomorrow", /said no to a loosening today/.test(await p.evaluate(`document.getElementById('saved').textContent`)) && !s.loosen && s.pending.rules.kinds.video.minutes === 25, { saved: await p.evaluate(`document.getElementById('saved').textContent`), pending: s.pending });
+
+  // 4. With the relay gone, nothing loosens (#8): ending exam mode early keeps waiting, and exam mode stays on.
+  const started = await p.evaluate(`chrome.runtime.sendMessage({ type: "startExam", until: Date.now() + 2 * 86400e3, goal: "midterm", source: "rules" })`);
+  await p.evaluate(`chrome.runtime.sendMessage({ type: "endExam" })`);
   stopRelay();
   await sleep(1500);
   await p.send("Page.reload"); await sleep(1200);
-  for (let i = 0; i < 3; i++) { await p.evaluate(`document.querySelector('[data-kind=video] [data-step="-1"]').click()`); await sleep(100); }
-  await sleep(1500); // back to 15: the waiting change is withdrawn
-  await plus("video", 1);
-  await reason("Lectures");
+  await reason("The exam was moved");
   s = await st();
-  check("with the agent out of reach, nobody is locked in: it waits for the morning", s.pending && s.pending.ok === true && s.pending.rules.kinds.video.minutes === 20, s.pending);
-  check("every request and answer is in the log", JSON.stringify(s.log.filter((e) => e.type === "loosen").map((e) => e.decision)) === JSON.stringify(["deny", "ask", "allow", "unavailable"]), s.log);
-  check("the agent saw the change and the reason", mock.requests.some((r) => r.body.system?.includes("You hold the key") && /Video: 15 min a day → 25 min a day/.test(r.body.messages[0].content) && /I just want more/.test(r.body.messages[0].content)));
+  check("with the agent out of reach, exam mode stays on and the request keeps waiting", started.ok && s.rules.exam && s.rules.exam.until > Date.now() && s.loosen && s.loosen.kind === "exam"
+    && /Nothing loosens yet/.test(await p.evaluate(`document.getElementById('saved').textContent`)), { exam: s.rules.exam, loosen: s.loosen });
+  check("every request and answer is in the log", JSON.stringify(s.log.filter((e) => e.type === "loosen").map((e) => e.decision)) === JSON.stringify(["ask", "allow", "deny", "unavailable"]), s.log.filter((e) => e.type === "loosen"));
+  check("the agent saw the change and the reason", mock.requests.some((r) => r.body.system?.includes("You hold the key") && /Video: 25 min a day → 30 min a day/.test(r.body.messages[0].content) && /I just want more/.test(r.body.messages[0].content)));
 } catch (e) {
   console.log("FAIL", e.message); failures++;
 }

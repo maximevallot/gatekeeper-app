@@ -66,10 +66,23 @@ export function warnings({ incognito, blind = [] }, into) {
   }
   if (blind.length) {
     out.push(el("div", { class: "note", id: "blind-warning" },
-      el("span", {}, `Gatekeeper can't see ${blind.slice(0, 2).join(", ")}${blind.length > 2 ? ` and ${blind.length - 2} more` : ""}, so they stay blocked. In ${extensionsPage()}, set Gatekeeper's Site access to "On specific sites".`)));
+      el("span", {}, `Gatekeeper can't see ${blind.slice(0, 2).join(", ")}${blind.length > 2 ? ` and ${blind.length - 2} more` : ""}, so they may open without being counted. In ${extensionsPage()}, set Gatekeeper's Site access to "On all sites", or `),
+      seeTabs()));
   }
   for (const w of out) into.before(w);
   return out.length;
+}
+
+/**
+ * QA round 2, C2: with site access withheld, the browser stops applying Gatekeeper's blocks there. Reading tab
+ * addresses ("tabs") lets Gatekeeper send such a page to the gate within two seconds, and count its time.
+ */
+function seeTabs() {
+  const b = el("button", { class: "link", type: "button", id: "see-tabs" }, "let Gatekeeper read tab addresses");
+  b.addEventListener("click", async () => {
+    if (await chrome.permissions.request({ permissions: ["tabs"] }).catch(() => false)) location.reload();
+  });
+  return b;
 }
 
 /** The name of the switch that lets an extension run in private windows. */
@@ -182,7 +195,7 @@ export function examForm(done, source = "extension") {
   const goal = el("input", { class: "field", id: "exam-for", maxlength: "200", placeholder: "For: 15.425 midterm", autocomplete: "off", "aria-label": "What it's for" });
   const go = el("button", { class: "btn", type: "submit", id: "exam-go" }, "Start");
   const form = el("form", { class: "section", id: "exam-start-form", style: "gap: 8px" },
-    el("div", { class: "small muted" }, "Every kind of site closes until then. Ending it early asks Gatekeeper."),
+    el("div", { class: "small muted" }, "Everything but study sites closes until then. Ending it early asks Gatekeeper."),
     until, goal, go);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();

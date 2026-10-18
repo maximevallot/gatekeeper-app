@@ -2,6 +2,10 @@ import { KINDS, KIND_ORDER } from "../engine/catalog.js";
 import { DEFAULT_MINUTES, minutesText, label, baseline } from "../engine/engine.js";
 import { ask, el, checkWorker, extensionsPage, privateToggle, stepper, whatsSentToggle } from "./common.js";
 
+// With Claude help off, nothing about the user leaves the browser. The one request that does go out is a bare
+// one for the time, to Gatekeeper's relay, when this computer's clock jumps (QA round 2, C1).
+const NOTHING_LEAVES = "Nothing leaves this browser, except a plain request for the time when your computer's clock jumps.";
+
 const $ = (id) => document.getElementById(id);
 const picked = new Set();
 let minutes = DEFAULT_MINUTES;
@@ -33,7 +37,7 @@ $("start-watch").addEventListener("click", async () => {
   await ask("watch", { goal: $("watch-goal").value });
   $("done-title").textContent = "You're watching";
   $("summary").textContent = "For the next 7 days nothing is blocked. Gatekeeper's toolbar button shows the time so far, and you can set limits early from there.";
-  $("done-privacy").textContent = "Nothing leaves this browser.";
+  $("done-privacy").textContent = NOTHING_LEAVES;
   $("watch").classList.add("hidden");
   $("done").classList.remove("hidden");
   checkPrivate();
@@ -76,7 +80,7 @@ $("start").addEventListener("click", async () => {
   // Say what actually leaves the browser, from what was saved, not from what was ticked.
   $("done-privacy").textContent = on
     ? "Claude help is on: only what you asked it for is sent, and only when it's needed. Everything else stays in this browser."
-    : "Nothing leaves this browser.";
+    : NOTHING_LEAVES;
   if (!saved || on !== help) {
     $("done-error").textContent = "Claude help wasn't saved. You can turn it on in your rules.";
     $("done-error").classList.remove("hidden");

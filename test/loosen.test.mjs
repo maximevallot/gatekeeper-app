@@ -70,20 +70,76 @@ test("tightening needs no agent", () => {
   assert.equal(r.state.loosen, null);
 });
 
-test("without Claude help, or with the agent out of reach, a loosening waits for the morning as before", () => {
+test("without Claude help ever on, a loosening waits for the morning; with the agent out of reach, it keeps waiting (QA round 2, H2)", () => {
   const off = more(setUp(false));
   assert.equal(off.needsOk, false);
   assert.equal(rollover(off.state, TUE).rules.kinds.video.minutes, 45);
   const r = more(setUp());
-  const u = loosenUnavailable(r.state, { message: "lectures", error: "unreachable", now: MON }).state;
-  assert.equal(u.loosen, null);
-  assert.equal(rollover(u, TUE).rules.kinds.video.minutes, 45, "nobody is locked in");
-  assert.equal(u.log.filter((e) => e.type === "loosen").at(-1).decision, "unavailable");
+  for (const error of ["unreachable", "daily_limit", "http_500"]) {
+    const u = loosenUnavailable(r.state, { message: "lectures", error, now: MON }).state;
+    assert.equal(u.loosen.kind, "rules", `${error}: the request keeps waiting`);
+    assert.equal(rollover(u, TUE).rules.kinds.video.minutes, 20, `${error}: nothing loosens without the agent's yes`);
+    assert.equal(u.log.filter((e) => e.type === "loosen").at(-1).decision, "unavailable");
+    assert.ok(loosenRequest(u, { message: "lectures", now: MON }).payload, "and it can be asked again later");
+  }
 });
 
-test("ending exam mode early: the agent decides; a yes ends it at once if the exam is done, else the next morning", () => {
+test("turning Claude help off is itself a loosening: until the morning, a loosening is refused; then the morning alone", () => {
+  const s = setHelp(setUp(), false);
+  const r = more(s);
+  assert.equal(r.refused, "help_off_today");
+  assert.equal(rollover(r.state, TUE).rules.kinds.video.minutes, 20, "nothing waits for the morning");
+  const next = more(rollover(s, TUE));
+  assert.equal(next.needsOk, false, "from the next morning, with help off, the morning rule as before");
+  assert.equal(rollover(next.state, TUE + 86400e3).rules.kinds.video.minutes, 45);
+  // A request already waiting for the agent when help goes off is not approved by it.
+  const waiting = setHelp(more(setUp()).state, false);
+  assert.equal(rollover(waiting, TUE).rules.kinds.video.minutes, 20);
+  assert.equal(more(waiting).refused, "help_off_today");
+});
+
+test("after a no, no loosening of the rules is asked until the morning: not one minute more (QA round 2, H3)", () => {
+  const r = more(setUp());
+  const n = applyLoosenAnswer(r.state, { answer: no, message: "I just want more", now: MON }).state;
+  const again = proposeRules(n, { ...n.rules, kinds: { ...n.rules.kinds, video: { minutes: 44 } } }, MON);
+  assert.equal(again.refused, "asked_today");
+  assert.equal(again.state.loosen, null);
+  const other = proposeRules(n, { ...n.rules, kinds: { ...n.rules.kinds, social: { minutes: 30 } } }, MON);
+  assert.equal(other.refused, "asked_today", "nor another rule");
+  assert.equal(proposeRules(n, { ...n.rules, kinds: { ...n.rules.kinds, social: { minutes: 5 } } }, MON).now.length, 1, "tightening still applies");
+  assert.equal(more(rollover(n, TUE)).needsOk, true, "tomorrow it can be asked again");
+});
+
+test("an approved change stays approved: a second loosening asks only about itself, and its no keeps the first (QA round 2, H1)", () => {
+  let s = applyLoosenAnswer(more(setUp()).state, { answer: yes, message: "lectures", now: MON }).state;
+  assert.equal(s.pending.ok, true);
+  const r = proposeRules(s, { ...s.pending.rules, kinds: { ...s.pending.rules.kinds, social: { minutes: 30 } } }, MON);
+  assert.deepEqual(r.state.loosen.changes, ["Social media: 15 min a day → 30 min a day"], "only what is new is asked");
+  const n = applyLoosenAnswer(r.state, { answer: no, message: "just because", now: MON }).state;
+  const tue = rollover(n, TUE);
+  assert.equal(tue.rules.kinds.video.minutes, 45, "the approved change still applies in the morning");
+  assert.equal(tue.rules.kinds.social.minutes, 15);
+  // Turning Claude help on does not put a change already waiting for the morning behind the agent (first-run H4).
+  const offWaiting = more(setUp(false)).state;
+  const on = setHelp(offWaiting, true);
+  const r2 = proposeRules(on, { ...on.pending.rules, kinds: { ...on.pending.rules.kinds, social: { minutes: 10 } } }, MON);
+  assert.equal(r2.needsOk, false);
+  assert.equal(rollover(r2.state, TUE).rules.kinds.video.minutes, 45);
+});
+
+test("ending exam mode early: the agent decides; a yes ends it at once only once the exam on the calendar has begun", () => {
   const WED = at("2026-10-22T08:30:00-04:00");
-  const s = startExam(setUp(), { until: WED, goal: "midterm" }, MON).state;
+  const s0 = startExam(setUp(), { until: WED, goal: "midterm" }, MON).state;
+  // QA round 2, C3: "it's over" two days before the exam. With no exam begun on the calendar, a "now" is the morning.
+  const early = applyLoosenAnswer(endExam(s0, MON).state, { answer: { ...yes, when: "now" }, message: "exam is over", now: MON });
+  assert.ok(examOn(early.state), "no exam has begun: not at once");
+  assert.equal(early.result.now, false);
+  assert.equal(loosenRequest(endExam(s0, MON).state, { message: "exam is over", now: MON }).payload.exam.examAt, null);
+  // The calendar has the midterm at 20:00 tonight, inside exam mode, and it has begun.
+  const EXAM = MON - 2 * 3600e3;
+  const s = { ...s0, calendar: { url: "https://x.edu/cal.ics", events: [{ title: "Midterm 15.425", start: EXAM }], fetchedAt: MON, error: null },
+    rules: { ...s0.rules, exam: { ...s0.rules.exam, from: EXAM - 3600e3 } } };
+  assert.equal(loosenRequest(endExam(s, MON).state, { message: "done", now: MON }).payload.exam.examAt, "2026-10-19T20:00:00-04:00");
   const e = endExam(s, MON);
   assert.equal(e.needsOk, true);
   assert.ok(examOn(e.state), "not before the agent's yes");
@@ -98,16 +154,16 @@ test("ending exam mode early: the agent decides; a yes ends it at once if the ex
   const n = applyLoosenAnswer(e.state, { answer: no, now: MON }).state;
   assert.ok(examOn(rollover(n, TUE)));
   assert.equal(endExam(n, MON).refused, "asked_today");
-  assert.ok(examOn(loosenUnavailable(e.state, { now: MON }).state), "out of reach: it runs to its end, as with Claude help off");
+  assert.ok(examOn(loosenUnavailable(e.state, { now: MON }).state), "out of reach: exam mode stays on");
 });
 
 test("every request and answer is logged on the device, and the week counts them", () => {
   let r = more(setUp());
   let s = applyLoosenAnswer(r.state, { answer: no, message: "I just want more", now: MON }).state;
-  r = proposeRules(s, { ...s.rules, kinds: { ...s.rules.kinds, social: { minutes: 30 } } }, MON);
-  s = applyLoosenAnswer(r.state, { answer: yes, message: "Group project chat lives there this week", now: MON }).state;
+  r = proposeRules(rollover(s, TUE), { ...s.rules, kinds: { ...s.rules.kinds, social: { minutes: 30 } } }, TUE);
+  s = applyLoosenAnswer(r.state, { answer: yes, message: "Group project chat lives there this week", now: TUE }).state;
   assert.deepEqual(s.log.filter((e) => e.type === "loosen").map((e) => [e.decision, e.message]), [["deny", "I just want more"], ["allow", "Group project chat lives there this week"]]);
-  const w = weekSummary(s, MON);
+  const w = weekSummary(s, TUE);
   assert.equal(w.loosenAsked, 2);
   assert.equal(w.loosenAllowed, 1);
 });

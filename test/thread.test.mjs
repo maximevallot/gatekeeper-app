@@ -44,7 +44,7 @@ test("Apply checks the card again: a loosening the agent refused since then is n
   const a = applyCard({ ...r.state, thread: s.thread }, MON + 60e3);
   assert.equal(a.outcome.refused, "asked_today");
   assert.equal(a.state.rules.kinds.video.minutes, 20);
-  assert.match(a.state.thread.turns.at(-1).text, /said no to that today/);
+  assert.match(a.state.thread.turns.at(-1).text, /said no to a loosening today/);
 });
 
 test("Not this drops the card; Forget this talk clears the thread", () => {

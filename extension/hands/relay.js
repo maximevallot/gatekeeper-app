@@ -24,3 +24,24 @@ export async function callRelay(path, body) {
     clearTimeout(timer);
   }
 }
+
+/**
+ * The time, from the relay's Date header, after this computer's clock jumped. Nothing is sent with it: a plain
+ * request, no install number, no data. Returns { server, local } (ms), or null if the relay can't be reached.
+ */
+export async function relayTime() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const before = Date.now();
+    const res = await fetch(RELAY_URL + "/", { method: "HEAD", cache: "no-store", credentials: "omit", signal: ctrl.signal });
+    const after = Date.now();
+    const server = Date.parse(res.headers.get("date") || "");
+    // The header has whole seconds; the middle of the request is the best guess for when it was written.
+    return Number.isFinite(server) ? { server: server + 500, local: Math.round((before + after) / 2) } : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

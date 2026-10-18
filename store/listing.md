@@ -114,3 +114,5 @@ Without the Mac app link, no permission is added, and the update shows no new wa
 - The talk with Gatekeeper is kept in the browser (the last 50 messages); the last six go to the relay with each message, as before, now with exam mode and the time of day.
 - The calendar link and its events are kept in the browser and read there once a day. Only the titles and dates of the next few events go to the relay, with a message at the gate, and only with Claude help on. Tick nothing new for the link itself: it is not collected.
 - Claude help's list of what is sent changed, so its consent version went up and users are asked again.
+
+**The time check (0.2):** when the computer's clock jumps by more than 15 minutes (after sleep, or when someone changes it), the extension sends Gatekeeper's relay a plain HEAD request and reads the time from the answer's Date header. Nothing is sent with it: no install number, no data. This happens with Claude help off too, so the privacy policy's 0.2.0 text needs a sentence for it. It keeps exam mode and the day from being ended by moving the clock (QA round 2, C1).

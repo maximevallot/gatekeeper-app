@@ -58,25 +58,54 @@ function cardView(c) {
   return el("div", { class: "change", id: "card" }, ...rows, el("div", { class: "actions" }, apply, not));
 }
 
+// A loosening waiting for its reason gets a box of its own (QA round 2, chat C1): the chat box below always
+// talks about rules, so "also limit reddit to 10" is never taken as the reason. "Not now" keeps the change
+// waiting; "Drop it" cancels the change.
+function reasonBox(l) {
+  const text = el("textarea", { class: "field", id: "reason-message", rows: 2, maxlength: 500, placeholder: "Why? Your reason, in one go", "aria-label": "Your reason" });
+  const sendIt = el("button", { class: "btn", type: "button", id: "reason-send" }, "Send reason");
+  const later = el("button", { class: "btn ghost", type: "button", id: "reason-later" }, "Not now");
+  const drop = el("button", { class: "link", type: "button", id: "reason-drop" }, l.kind === "exam" ? "Keep exam mode" : "Drop this change");
+  sendIt.addEventListener("click", async () => {
+    const m = text.value.trim();
+    if (!m || busy) return;
+    busy = true; sendIt.disabled = true;
+    await ask("loosen", { message: m }).catch(() => null);
+    busy = false; reasonHidden = false;
+    await load(true);
+  });
+  later.addEventListener("click", () => { reasonHidden = true; render(); });
+  drop.addEventListener("click", async () => { await ask("dropLoosen").catch(() => null); await load(true); });
+  const what = l.kind === "exam" ? "End exam mode early" : l.changes.join("; ");
+  return el("div", { class: "change", id: "reason" },
+    el("div", { class: "small" }, l.asked ? l.asked : `To loosen this, tell Gatekeeper why: ${what}.`),
+    text, el("div", { class: "actions" }, sendIt, later, drop));
+}
+let reasonHidden = false;
+
 function render() {
   const th = (got.state.thread) || { turns: [], card: null };
   const items = th.turns.length ? th.turns.map(bubble)
     : [el("div", { class: "bubble" }, "Say what to change, in your words. Anything that loosens a rule needs a reason, and then waits for the morning.")];
   if (th.card) items.push(cardView(th.card));
+  const l = got.state.loosen;
+  if (l && !reasonHidden) items.push(reasonBox(l));
+  else if (l) {
+    const open = el("button", { class: "link", type: "button", id: "reason-open" }, "Give your reason");
+    open.addEventListener("click", () => { reasonHidden = false; render(); });
+    items.push(el("div", { class: "small muted", style: "align-self: center" }, "A change is waiting for your reason. ", open));
+  }
   $("chat-log").replaceChildren(...items);
   $("chat-log").lastChild.scrollIntoView({ block: "end" });
-  // A loosening waiting for its reason: the next message is that reason, for the agent.
-  const reason = !!got.state.loosen;
-  $("chat-message").placeholder = reason ? "Your reason, in one go" : "Say it in your words";
-  $("suggest").classList.toggle("hidden", th.turns.length > 0 || reason);
+  $("suggest").classList.toggle("hidden", th.turns.length > 0 || !!l);
 }
 
 let shown = "";
-async function load() {
+async function load(force = false) {
   got = await ask("state");
   // The state changes every few seconds while time is counted; redraw only when the talk itself changed.
   const key = JSON.stringify([got.state.thread, got.state.loosen, got.consent && got.consent.help]);
-  if (key === shown) return;
+  if (key === shown && !force) return;
   shown = key;
   render();
 }
@@ -108,8 +137,7 @@ async function send(text) {
   busy = true;
   $("chat-message").value = "";
   $("chat-send").disabled = $("chat-message").disabled = true;
-  if (got.state.loosen) await ask("loosen", { message: text }).catch(() => null);
-  else await ask("chat", { message: text }).catch(() => null);
+  await ask("chat", { message: text }).catch(() => null);
   busy = false;
   $("chat-send").disabled = $("chat-message").disabled = false;
   $("chat-message").focus();

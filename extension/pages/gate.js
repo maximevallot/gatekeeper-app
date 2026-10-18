@@ -14,10 +14,11 @@ async function show() {
   const decided = await ask("decide", { url, count: !counted });
   counted = true;
   const { decision: d, goal } = decided;
-  if (decided.judging && waits++ < 6) {
-    // A video stopped before it loaded, being checked against the video rules: ask again in a moment.
-    document.title = "Checking this video";
-    $("headline").textContent = "Checking this video…";
+  if ((decided.judging || decided.sorting) && waits++ < 6) {
+    // A video being checked against the video rules, or (in exam mode) a site being sorted: ask again in a moment.
+    const what = decided.judging ? "video" : "site";
+    document.title = `Checking this ${what}`;
+    $("headline").textContent = `Checking this ${what}…`;
     $("closed").classList.remove("hidden");
     setTimeout(show, 1500);
     return;
@@ -31,7 +32,7 @@ async function show() {
   const until = `Closed until ${when(d.reopensAt).replace(/^(today|tomorrow) at (.*)$/, "$2 $1")}`;
   if (d.exam) {
     $("headline").textContent = `Exam mode until ${when(d.exam.until).replace(/^(today|tomorrow) at (.*)$/, "$2 $1")}`;
-    $("used").textContent = d.exam.goal ? `For ${d.exam.goal}. Every kind of site is closed until then.` : "Every kind of site is closed until then.";
+    $("used").textContent = (d.exam.goal ? `For ${d.exam.goal}. ` : "") + "Everything but study sites is closed until then.";
   } else if (d.video) {
     // A video rule, not a kind: the gate does not argue with it; the rules page changes it.
     const rule = `Your rule on ${d.video.name} videos${d.video.except ? `, except ${d.video.except}` : ""}`;

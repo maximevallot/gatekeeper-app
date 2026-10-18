@@ -27,6 +27,7 @@
     "*://*.weibo.com/*",
     "*://*.youtube.com/*",
     "*://*.youtu.be/*",
+    "*://*.youtube-nocookie.com/*",
     "*://*.netflix.com/*",
     "*://*.twitch.tv/*",
     "*://*.primevideo.com/*",
@@ -96,7 +97,8 @@
     "https://gatekeeper-relay.mvallot22.workers.dev/*"
   ],
   "optional_permissions": [
-    "nativeMessaging"
+    "nativeMessaging",
+    "tabs"
   ],
   "optional_host_permissions": [
     "*://*/*"

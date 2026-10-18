@@ -18,7 +18,7 @@ export const KINDS = {
     examples: "YouTube, Netflix, Twitch",
     label: "Video",
     domains: [
-      "youtube.com", "youtu.be", "netflix.com", "twitch.tv", "primevideo.com", "disneyplus.com", "hulu.com",
+      "youtube.com", "youtu.be", "youtube-nocookie.com", "netflix.com", "twitch.tv", "primevideo.com", "disneyplus.com", "hulu.com",
       "max.com", "vimeo.com", "dailymotion.com", "crunchyroll.com", "bilibili.com", "kick.com",
     ],
   },
@@ -76,4 +76,21 @@ export function catalogKind(host) {
     }
   }
   return best ? best.kind : null;
+}
+
+// Names under which anyone can register a site: never a site of their own, since a rule on "co.uk" or
+// "github.io" would cover thousands of sites (QA round 2, C4). Not the whole public suffix list: the ones in use.
+export const PUBLIC_SUFFIXES = new Set([
+  "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "com.au", "net.au", "org.au", "edu.au", "co.nz", "co.jp", "ne.jp",
+  "or.jp", "co.kr", "com.br", "com.mx", "com.ar", "co.in", "co.za", "com.cn", "com.tw", "com.hk", "com.sg", "com.tr",
+  "github.io", "gitlab.io", "blogspot.com", "herokuapp.com", "vercel.app", "netlify.app", "pages.dev", "workers.dev",
+  "web.app", "firebaseapp.com", "appspot.com", "azurewebsites.net", "cloudfront.net", "wordpress.com", "substack.com",
+]);
+
+/** A domain a rule may name: a host with a dot, not a public suffix. "www." is dropped. */
+export function ruleDomain(raw) {
+  const d = String(raw || "").trim().toLowerCase();
+  const host = hostOf(d.includes("://") ? d : "https://" + d + "/");
+  if (!host || !host.includes(".") || PUBLIC_SUFFIXES.has(host)) return null;
+  return host.replace(/^www\./, "");
 }

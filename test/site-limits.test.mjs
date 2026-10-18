@@ -58,12 +58,17 @@ test("the bad version he met, then his correction: the correction is a change, n
   const hist = chatRequest(r.state, { message: "make it 30", now: MON }).payload.history.map((h) => h.role);
   assert.deepEqual(hist, ["user", "gatekeeper", "user", "gatekeeper"]);
   s = applyCard(r.state, MON).state;
-  // Even with lequipe sorted as news and news watched, its time counts against lequipe.fr only.
-  s = recordSort(proposeRules(s, { ...s.rules, kinds: { ...s.rules.kinds, news: { minutes: 30 } } }, MON).state, "lequipe.fr", "news");
-  s = run(s, LEQUIPE, 3);
-  assert.equal(s.usage.seconds["s:lequipe.fr"], 180);
-  assert.equal(s.usage.seconds.news || 0, 0, "it counts against nothing else");
-  assert.equal(decide(s, { url: "https://www.nytimes.com/", now: MON }).leftMinutes, 30);
+  // News not watched: its time counts against lequipe.fr only.
+  s = recordSort(s, "lequipe.fr", "news");
+  let r2 = run(s, LEQUIPE, 3);
+  assert.equal(r2.usage.seconds["s:lequipe.fr"], 180);
+  assert.equal(r2.usage.seconds.news || 0, 0, "news is not watched, so it counts against nothing else");
+  // News watched (QA round 2, H3): inside a watched kind it counts against both, and the smaller wins.
+  r2 = run(proposeRules(s, { ...s.rules, kinds: { ...s.rules.kinds, news: { minutes: 30 } } }, MON).state, LEQUIPE, 3);
+  assert.equal(r2.usage.seconds["s:lequipe.fr"], 180);
+  assert.equal(r2.usage.seconds.news, 180);
+  assert.equal(decide(r2, { url: "https://www.nytimes.com/", now: MON }).leftMinutes, 27);
+  assert.equal(decide(r2, { url: LEQUIPE, now: MON }).leftMinutes, 12);
 });
 
 test("\"make it 30\" and \"only in exam mode\" right after the card replace it and apply now", () => {
@@ -123,10 +128,15 @@ test("a catalog site closed on its own while its kind is not watched, and a subd
   // Giving a subdomain of a closed site time of its own would open it today: that waits.
   const r = proposeRules(s, { ...s.rules, siteLimits: { "nytimes.com": 0, "cooking.nytimes.com": 20 } }, MON);
   assert.deepEqual(r.later.map((c) => c.text), ["cooking.nytimes.com: 20 min a day"]);
-  // cooking.nytimes.com with its own 20 minutes first, then News closed: it stays open, let through above the block.
+  // Inside a closed kind, a site's own minutes don't open it: both count (QA round 2, H3).
+  const inNews = proposeRules(setUp({ news: 0 }), { ...setUp({ news: 0 }).rules, siteLimits: { "cooking.nytimes.com": 20 } }, MON);
+  assert.deepEqual(inNews.now.map((c) => c.text), ["cooking.nytimes.com: 20 min a day"], "a limit inside a kind only tightens, so it applies now");
+  assert.equal(decide(inNews.state, { url: "https://cooking.nytimes.com/recipes", now: MON }).verdict, "block");
+  // cooking.nytimes.com with its own 20 minutes first, then nytimes.com closed on its own: it stays open, let
+  // through above the block.
   s = proposeRules(setUp(), { ...setUp().rules, siteLimits: { "cooking.nytimes.com": 20 } }, MON).state;
-  s = proposeRules(s, { ...s.rules, kinds: { ...s.rules.kinds, news: { minutes: 0 } } }, MON).state;
-  assert.equal(s.rules.kinds.news.minutes, 0);
+  s = proposeRules(s, { ...s.rules, siteLimits: { ...s.rules.siteLimits, "nytimes.com": 0 } }, MON).state;
+  assert.equal(s.rules.siteLimits["nytimes.com"], 0);
   assert.equal(decide(s, { url: "https://cooking.nytimes.com/recipes", now: MON }).verdict, "allow");
   assert.equal(decide(s, { url: "https://www.nytimes.com/", now: MON }).verdict, "block");
   const e = enforcement(s, MON);
@@ -137,15 +147,17 @@ test("a catalog site closed on its own while its kind is not watched, and a subd
   assert.deepEqual(allow.condition.requestDomains, ["cooking.nytimes.com"]);
 });
 
-test("adding a limit is a loosening when the site's kind leaves less: News spent, lequipe sorted as news", () => {
+test("adding a limit inside a spent kind only tightens: it applies now, and the kind still closes the site", () => {
   let s = recordSort(setUp({ news: 10 }), "lequipe.fr", "news");
   s = run(s, LEQUIPE, 10);
   const t = MON + 10 * 60e3;
   assert.equal(decide(s, { url: LEQUIPE, now: t }).verdict, "gate");
   const r = proposeRules(s, { ...s.rules, siteLimits: { "lequipe.fr": 15 } }, t);
-  assert.deepEqual(r.now, []);
-  assert.deepEqual(r.later.map((c) => c.text), ["lequipe.fr: 15 min a day"], "15 fresh minutes would open it today, so it waits");
-  assert.equal(decide(r.state, { url: LEQUIPE, now: t }).verdict, "gate");
+  assert.deepEqual(r.now.map((c) => c.text), ["lequipe.fr: 15 min a day"]);
+  const d = decide(r.state, { url: LEQUIPE, now: t });
+  assert.equal(d.verdict, "gate", "fresh minutes of its own don't reopen it: News is spent");
+  assert.equal(d.label, "News", "the gate speaks of the kind that closes it");
+  assert.equal(gateRequest(r.state, { url: LEQUIPE, message: "need it", now: t }).payload.kind, "news");
 });
 
 test("exam mode closes a site's own limit, null (only in exam mode) included; null is open on other days", () => {

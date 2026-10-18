@@ -197,8 +197,18 @@ try {
   await p.evaluate(`document.getElementById('chat-message').value = 'make it 30'; document.getElementById('chat-form').requestSubmit();`);
   await sleep(2000);
   const more = await p.evaluate(`(document.getElementById('card') || {}).innerText || ''`);
-  check("\"make it 30\": 15 → 30 is a loosening that asks why", /lequipe\.fr: 15 → 30 min a day/.test(more) && /tomorrow/i.test(more) && /once you've said why/.test(more) && !/browser will ask/.test(more), more);
-  await p.evaluate(`document.getElementById('not-this').click()`); await sleep(800);
+  check("\"make it 30\": 15 → 30 is a loosening that asks why", /lequipe\.fr: 15 → 30 min a day/.test(more) && /asks you why/i.test(more) && !/browser will ask/.test(more), more);
+  // QA round 2, #5: after Apply on a loosening, the reason has a box of its own; the chat box still changes rules.
+  await p.evaluate(`document.getElementById('apply').click()`); await sleep(1500);
+  check("Apply on a loosening opens a reason box", await p.evaluate(`!!document.getElementById('reason')`));
+  await p.evaluate(`document.getElementById('chat-message').value = 'also limit reddit to 10'; document.getElementById('chat-form').requestSubmit();`);
+  await sleep(2000);
+  const toRules = mock.requests.filter((r) => r.body.system?.includes("You change the rules")).at(-1);
+  check("a new request in the chat box goes to the rules chat, never as the reason", /also limit reddit to 10/.test(toRules.body.messages[0].content)
+    && !mock.requests.some((r) => r.body.system?.includes("You hold the key") && /reddit/.test(r.body.messages[0].content)));
+  await p.evaluate(`document.getElementById('reason-drop').click()`); await sleep(1200);
+  s = await st();
+  check("Drop this change: nothing loosens, nothing waits", !s.loosen && s.rules.siteLimits["lequipe.fr"] === 15 && !s.pending, { loosen: s.loosen, pending: s.pending });
 
   // Turning judging off forgets what Claude judged.
   await p.send("Page.navigate", { url: rulesUrl }); await sleep(1200);

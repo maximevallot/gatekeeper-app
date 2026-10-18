@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   initialState, completeSetup, decide, tick, proposeRules, closedDomains, gateRequest, setHelp, startExam, endExam, examOn,
   applyMacRequest, snapshot, snapshotKey, todaySummary, rollover, applyGateAnswer, setSorting,
+  recordSort,
 } from "../extension/engine/engine.js";
 
 const at = (iso) => new Date(iso).getTime();
@@ -22,7 +23,12 @@ test("exam.start closes every kind at once, watched or not, until the end time",
     assert.equal(d.exam.goal, "15.425 midterm");
     assert.equal(d.reopensAt, WED);
   }
-  assert.equal(decide(s, { url: "https://canvas.mit.edu/", now: MON }).verdict, "allow");
+  // Everything but study (QA round 2, H4): a site not sorted yet is closed until it is; study opens; other stays closed.
+  assert.equal(decide(s, { url: "https://canvas.mit.edu/", now: MON }).verdict, "block");
+  assert.equal(decide(s, { url: "https://canvas.mit.edu/", now: MON }).unsorted, true);
+  assert.equal(decide(recordSort(s, "canvas.mit.edu", "study"), { url: "https://canvas.mit.edu/", now: MON }).verdict, "allow");
+  assert.equal(decide(recordSort(s, "discord.com", "other"), { url: "https://discord.com/", now: MON }).verdict, "block");
+  assert.equal(decide(recordSort(s, "mail.google.com", "work"), { url: "https://mail.google.com/", now: MON }).verdict, "block");
   assert.ok(closedDomains(s, MON).includes("youtube.com"), "Video is not watched, and is still closed");
   assert.equal(decide(s, { url: "https://www.youtube.com/", now: WED + 1 }).verdict, "allow", "it ends by itself");
 });

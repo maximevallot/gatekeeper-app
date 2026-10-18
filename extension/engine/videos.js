@@ -10,7 +10,7 @@
 // The rules chat also lives here: it turns the relay's list of operations into the rules the user would
 // have, which then go through proposeRules like any other change.
 
-import { KINDS, hostOf, matches, catalogKind } from "./catalog.js";
+import { KINDS, hostOf, matches, catalogKind, ruleDomain } from "./catalog.js";
 
 export const VIDEO_SITES = ["youtube.com"]; // the only site with video rules for now
 export const MAX_VIDEO_RULES = 20;
@@ -155,9 +155,7 @@ const OPS = ["budget", "unwatch", "site", "unsite", "siteLimit", "dropSiteLimit"
 const ALIASES = { siteBudget: "siteLimit", dropSite: "dropSiteLimit" };
 
 function domainOf(raw) {
-  const d = String(raw || "").trim().toLowerCase();
-  const host = hostOf(d.includes("://") ? d : "https://" + d + "/");
-  return host && host.includes(".") ? host.replace(/^www\./, "") : null;
+  return ruleDomain(raw); // a host with a dot, not a public suffix ("co.uk", "github.io")
 }
 
 /**

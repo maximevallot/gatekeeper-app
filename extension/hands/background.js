@@ -5,7 +5,7 @@
 import * as engine from "../engine/engine.js";
 import { videoUrl, videoKeyOf } from "../engine/videos.js";
 import { buildRules } from "./blocker.js";
-import { callRelay } from "./relay.js";
+import { callRelay, relayTime } from "./relay.js";
 import { PROTOCOL } from "../protocol.js";
 
 const TICK_MS = 2000;
@@ -25,7 +25,8 @@ let lastTick = Date.now();
 
 async function load() {
   if (!state) {
-    state = engine.upgrade((await chrome.storage.local.get("state")).state);
+    // The hands guard the clock: a jump is checked against the relay's time before it counts (QA round 2, C1).
+    state = engine.guardClock(engine.upgrade((await chrome.storage.local.get("state")).state));
     if (!state.installId) {
       state = { ...state, installId: crypto.randomUUID() };
       await chrome.storage.local.set({ state });
@@ -53,11 +54,25 @@ function update(step) {
 
 /** The watched domains whose access the user withheld (site access "On click", or one site removed). */
 async function withheldDomains() {
-  const { origins = [] } = await chrome.permissions.getAll();
+  const { origins = [], permissions = [] } = await chrome.permissions.getAll();
+  // With "tabs", every tab's address can be read whatever site access says: the tick sends a closed page to the
+  // gate and counts an open one, so nothing is blind (QA round 2, C2).
+  if (permissions.includes("tabs")) return [];
   const all = origins.some((o) => o === "<all_urls>" || o === "*://*/*");
   const granted = new Set(origins.map((o) => (o.match(/^\*:\/\/\*\.([^/]+)\/\*$/) || [])[1]).filter(Boolean));
   const covered = (d) => { for (let x = d; x.includes("."); x = x.slice(x.indexOf(".") + 1)) if (granted.has(x)) return true; return false; };
   return all ? [] : engine.watchedDomains(state).filter((d) => !covered(d));
+}
+
+// ---------- the clock ----------
+
+let lastTimeCheck = 0;
+/** The clock jumped: ask the relay for the time, at most twice a minute, until it answers. */
+async function checkTime() {
+  if (!state || !engine.timeCheckNeeded(state) || Date.now() - lastTimeCheck < 30e3) return;
+  lastTimeCheck = Date.now();
+  const t = await relayTime();
+  if (t) await update((s) => ({ state: engine.confirmTime(s, t) }));
 }
 
 // ---------- the calendar link ----------
@@ -126,16 +141,16 @@ async function macExchange(force) {
 }
 
 async function syncBlocking() {
-  const e = engine.enforcement(state, Date.now(), { withheld: await withheldDomains() });
+  const e = engine.enforcement(state, Date.now(), { withheld: await withheldDomains(), seeAll: await chrome.permissions.contains(ALL_SITES) });
   blind = e.blind;
-  const key = JSON.stringify([e.redirect, e.block, e.allowVideos, e.closeVideos, e.allowSites]);
+  const key = JSON.stringify([e.redirect, e.block, e.allowVideos, e.closeVideos, e.allowSites, e.examAll]);
   if (key !== blocking) {
     const old = await chrome.declarativeNetRequest.getDynamicRules();
     await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: old.map((r) => r.id), addRules: buildRules(e, GATE) });
     blocking = key;
   }
   // When a kind closes, every open tab of it goes to the gate, not only the one in front.
-  const closedNow = e.redirect.join(" ");
+  const closedNow = e.redirect.join(" ") + (e.examAll ? " *" : "");
   if (closedNow !== closedBefore) {
     closedBefore = closedNow;
     if (e.redirect.length) await sweepTabs();
@@ -181,6 +196,7 @@ async function tick() {
   const present = chrome.idle ? (await chrome.idle.queryState(IDLE_SECONDS)) === "active" : true;
   const active = present || !!(tab && tab.audible);
   const out = await update((s) => engine.tick(s, { url: front || "", title: (tab && tab.title) || "", focused, active, seconds, now, audible }));
+  checkTime();
   if (!front) {
     badge(blind.length ? "!" : "");
     return;
@@ -190,6 +206,8 @@ async function tick() {
   // The watch week just ended: show the week once, with the way to set limits from it.
   if (engine.watchReady(state) && !watchTabOpened) {
     watchTabOpened = true;
+    // Once ever: marked shown as it opens, so a browser restart doesn't open it again.
+    await update((st) => ({ state: engine.markWatchShown(st) }));
     chrome.tabs.create({ url: chrome.runtime.getURL("pages/week.html?ready=1") });
   }
   if (out.judge) judgeVideo(out.judge);
@@ -198,10 +216,12 @@ async function tick() {
     await chrome.tabs.update(tab.id, { url: gateUrl(url) });
     badge(blind.length ? "!" : "");
   } else {
-    badge(blind.length ? "!" : d.watched ? String(d.leftMinutes) : "");
+    // The watch week shows the minutes so far (QA round 2, first-run H1); otherwise the minutes left.
+    badge(blind.length ? "!" : d.watching ? String(d.usedMinutes || 0) : d.watched && Number.isFinite(d.leftMinutes) ? String(d.leftMinutes) : "");
   }
 }
 
+const sortingNow = new Set();
 /** Ask the relay which kind an unknown site is, and remember the answer on this device. */
 async function sortSite(domain, title) {
   const s = await load();
@@ -260,7 +280,8 @@ const handlers = {
   async state() {
     const s = engine.rollover(await load(), Date.now());
     const incognito = await chrome.extension.isAllowedIncognitoAccess();
-    return { state: s, now: Date.now(), closed: engine.closedKinds(s, Date.now()), blind, incognito, consent: engine.consentStatus(s) };
+    const seeAll = await chrome.permissions.contains(ALL_SITES);
+    return { state: s, now: Date.now(), closed: engine.closedKinds(s, Date.now()), blind, incognito, seeAll, consent: engine.consentStatus(s) };
   },
   async decide({ url, count }) {
     // `count`: the gate page's first look at a closed site, one more "time the gate held" for the week.
@@ -272,9 +293,13 @@ const handlers = {
     const judging = engine.needsJudgment(state, url);
     if (judging) judgeVideo(videoKeyOf(url));
     const decision = engine.decide(state, { url, now: Date.now() });
-    const cooldownUntil = (state.cooldowns || {})[decision.kind] || 0;
+    // Exam mode closes a site not sorted yet: sort it now (with Claude help); a study site then opens.
+    const domain = engine.siteDomain(url);
+    const sorting = !!(decision.unsorted && engine.consented(state, "sorting") && state.sorting && domain);
+    if (sorting && !sortingNow.has(domain)) { sortingNow.add(domain); sortSite(domain, "").finally(() => sortingNow.delete(domain)); }
+    const cooldownUntil = (state.cooldowns || {})[decision.ladder || decision.kind] || 0;
     const incognito = await chrome.extension.isAllowedIncognitoAccess();
-    return { decision, goal: state.goal, talk: engine.consented(state, "talk"), cooldownUntil: cooldownUntil > state.clock.floor ? cooldownUntil : 0, incognito, blind, judging };
+    return { decision, goal: state.goal, talk: engine.consented(state, "talk"), cooldownUntil: cooldownUntil > state.clock.floor ? cooldownUntil : 0, incognito, blind, judging, sorting };
   },
   // One message at the gate. The relay is asked only if the engine says there is something to ask.
   async talk({ url, message }) {
@@ -376,6 +401,11 @@ const handlers = {
     }
     return out.result;
   },
+  // "Drop this change" next to a loosening's reason box: the change is cancelled, nothing loosens.
+  async dropLoosen() {
+    await update((s) => ({ state: engine.dropLoosen(s, Date.now()) }));
+    return { ok: true };
+  },
   async mac() {
     await macSync(true);
     return { ...macStatus, permitted: await chrome.permissions.contains(NATIVE) };
@@ -398,7 +428,7 @@ const handlers = {
   },
   async propose({ rules, goal }) {
     const out = await update((s) => {
-      const r = engine.proposeRules(s, rules, Date.now());
+      const r = engine.proposeRules(s, rules, Date.now(), { undoable: true });
       return { ...r, state: goal === undefined ? r.state : engine.setGoal(r.state, goal) };
     });
     return { now: out.now, later: out.later, from: out.from, needsOk: !!out.needsOk, refused: out.refused };

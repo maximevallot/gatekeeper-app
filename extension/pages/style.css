@@ -1,10 +1,6 @@
 /* Gatekeeper's pages. Light is the default; dark is deep slate, never black. */
-@font-face {
-  font-family: "Figtree";
-  src: url("../fonts/Figtree.woff2") format("woff2");
-  font-weight: 300 900;
-  font-display: swap;
-}
+/* Figtree is used where it is installed; the font file is not shipped until Maxime says yes to adding it, so no
+   @font-face points at a missing file (Safari reported "Unable to find fonts/Figtree.woff2"). */
 
 :root {
   --ground: #F6F7FB; --surface: #FFFFFF; --ink: #161A23; --muted: #5B6270; --line: #E3E6EE; --field: #C9CFDB;

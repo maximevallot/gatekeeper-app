@@ -37,7 +37,7 @@ test("one log: rule changes, exam starts and ends with where they came from, pas
   assert.ok(types.includes("rules") && types.includes("exam.start") && types.includes("exam.end") && types.includes("loosen") && types.includes("pass") && types.includes("gate.no"), types);
   assert.equal(s.log.find((e) => e.type === "exam.start").source, "mac");
   assert.equal(s.log.find((e) => e.type === "rules" && e.source === "rules").now[0], "Video: 20 min a day → 10 min a day");
-  assert.equal(s.log.find((e) => e.type === "exam.end").how, "agent, at once");
+  assert.equal(s.log.find((e) => e.type === "exam.end").how, "agent, next morning", "no exam on the calendar has begun, so not at once");
   assert.equal(weekSummary(s, MON).examStarts, 1);
 });
 

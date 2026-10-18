@@ -5,8 +5,13 @@ import { createServer } from "node:http";
 
 const KINDS = { "agar.io": "games", "mygame.localhost": "games", "instagram.com": "social" };
 
-function answer(body) {
-  const user = body.messages?.[0]?.content ?? "";
+// Text of a system prompt or message, given as a string or as content blocks (the relay caches its prompts,
+// which sends them as blocks with cache_control).
+const textOf = (v) => (Array.isArray(v) ? v.map((b) => (typeof b === "string" ? b : b.text || "")).join("\n") : v ?? "");
+
+function answer(raw) {
+  const body = { ...raw, system: textOf(raw.system) };
+  const user = textOf(body.messages?.[0]?.content);
   if (body.system?.includes("You sort websites")) {
     const domain = /^domain: (.+)$/m.exec(user)?.[1] ?? "";
     return { kind: KINDS[domain] ?? "other" };
@@ -55,7 +60,9 @@ export function startMock(expectedKey) {
     let raw = "";
     req.on("data", (c) => (raw += c));
     req.on("end", () => {
-      const body = JSON.parse(raw || "{}");
+      // Recorded with the system prompt and messages as plain text, whichever form the relay sent.
+      const sent = JSON.parse(raw || "{}");
+      const body = { ...sent, system: textOf(sent.system), messages: (sent.messages || []).map((m) => ({ ...m, content: textOf(m.content) })) };
       requests.push({ path: req.url, body });
       if (req.url !== "/v1/messages" || req.headers["x-api-key"] !== expectedKey) {
         res.writeHead(401, { "content-type": "application/json" });

@@ -14,18 +14,28 @@ let warned = false;
 
 const wanted = () => structuredClone(got.state.pending ? got.state.pending.rules : got.state.rules);
 
-function saved(text) {
-  $("saved").textContent = text;
+function saved(text, undo = null) {
+  $("saved").replaceChildren(text);
   clearTimeout(saved.t);
-  saved.t = setTimeout(() => { $("saved").textContent = "Saved as you go"; }, 4000);
+  if (undo) {
+    // A stray tap is undone for free for a minute (QA round 2, first-run H3).
+    const b = el("button", { class: "link", type: "button", id: "undo" }, "Undo");
+    b.addEventListener("click", () => propose(undo, {}, false));
+    $("saved").append(" · ", b);
+  }
+  saved.t = setTimeout(() => { $("saved").textContent = "Saved as you go"; }, undo ? 60e3 : 4000);
 }
 
-async function propose(rules, extra = {}) {
+async function propose(rules, extra = {}, undoable = true) {
+  const before = got && wanted(); // what was asked for before this change, waiting changes included
   try {
     const r = await ask("propose", { rules, ...extra });
-    saved(r.refused === "asked_today" ? "Gatekeeper said no to that today. Ask again tomorrow."
+    const tightened = r.now && r.now.length;
+    saved(r.refused === "asked_today" ? "Gatekeeper said no to a loosening today. Ask again tomorrow."
+      : r.refused === "help_off_today" ? "Claude help was turned off today, so nothing loosens until tomorrow."
       : r.needsOk ? "Saved. To loosen it, tell Gatekeeper why."
-      : r.later && r.later.length ? `Saved. Loosening applies ${when(r.from)}.` : "Saved");
+      : r.later && r.later.length ? `Saved. Loosening applies ${when(r.from)}.` : tightened ? "Saved" : "Saved",
+    undoable && tightened ? before : null);
   } catch {
     saved("Not saved: Gatekeeper's background didn't answer");
   }
@@ -256,7 +266,10 @@ function renderExam() {
   $("exam-start-row").classList.toggle("hidden", on);
   if (!on) return;
   $("exam-title").textContent = `Exam mode until ${when(s.rules.exam.until)}`;
-  $("exam-goal").textContent = s.rules.exam.goal || "Every kind of site is closed until then.";
+  // Everything but study is closed; sites Gatekeeper doesn't know can only be closed where it may see every site.
+  $("exam-goal").textContent = (s.rules.exam.goal ? s.rules.exam.goal + ". " : "") + (got.seeAll
+    ? "Everything but study sites is closed until then."
+    : "Every kind of site is closed until then. Sites Gatekeeper doesn't know stay open: turn on Claude help and let it see all sites to close them.");
   // The Mac app's "End exam mode early" opens this page at #exam.
   if (location.hash === "#exam" && !renderExam.opened) { renderExam.opened = true; $("exam-end-open").focus(); }
 }
@@ -301,6 +314,7 @@ function renderLoosen() {
 function loosenSay(text, me) {
   $("loosen-log").append(el("div", { class: "bubble" + (me ? " me" : "") }, text));
 }
+$("loosen-drop").addEventListener("click", async () => { await ask("dropLoosen").catch(() => null); saved("Dropped: nothing loosens"); await load(); });
 $("loosen-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = $("loosen-message").value.trim();
@@ -313,7 +327,7 @@ $("loosen-form").addEventListener("submit", async (e) => {
   if (r.decision === "allow") { loosenSay(r.reply); saved(r.now ? "Agreed: it applies now" : `Agreed: it applies ${when(r.from)}`); }
   else if (r.decision === "ask") { loosenSay(r.reply); $("loosen-message").focus(); return; }
   else if (r.decision === "deny") { loosenSay(r.reply); saved("The rule stays. You can ask again tomorrow."); }
-  else if (r.decision === "unavailable") saved("Couldn't reach Gatekeeper's agent, so it waits for the morning as usual");
+  else if (r.decision === "unavailable") { saved("Couldn't reach Gatekeeper. Nothing loosens yet; ask again later."); await load(); return; }
   else saved("Nothing was sent");
   await load();
   $("loosen-card").classList.add("hidden");
