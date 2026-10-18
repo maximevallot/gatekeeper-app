@@ -101,3 +101,16 @@ Without the Mac app link, no permission is added, and the update shows no new wa
 **Data usage, with the Mac app link:** no new box is ticked for data sent off the device, because nothing goes to a server. The privacy policy (0.2.0 text, `~/gatekeeper-relay/pages/privacy-0.2.0.html`) says what the extension shares with the Mac app on the computer: the goal, each watched kind's minutes and status today, and exam mode. It also says that the Mac app keeps it in `~/Library/Application Support/Gatekeeper/today.json`, where other apps the user runs can read it.
 
 **Data usage, what to tick:** the same boxes as 0.1.1. Website content now also covers video titles and channels; user activity / personal communications now also covers what the user writes in the rules chat.
+
+## For the build with one thread, exam mode in the extension and the calendar link (not 0.1.1)
+
+**Description: add**
+
+- Exam mode from the browser: pick an end time, and every kind of site closes until then. The gate gives a few minutes only for a page you need for the exam. Paste your calendar link once (Canvas's calendar feed works), and Gatekeeper offers exam mode before an exam on it, with one click; it never starts by itself.
+- Loosening a rule, or ending exam mode early, needs a reason Gatekeeper accepts, and still waits for the next morning (an exam that is over ends at once).
+
+**Data usage: what changes**
+
+- The talk with Gatekeeper is kept in the browser (the last 50 messages); the last six go to the relay with each message, as before, now with exam mode and the time of day.
+- The calendar link and its events are kept in the browser and read there once a day. Only the titles and dates of the next few events go to the relay, with a message at the gate, and only with Claude help on. Tick nothing new for the link itself: it is not collected.
+- Claude help's list of what is sent changed, so its consent version went up and users are asked again.

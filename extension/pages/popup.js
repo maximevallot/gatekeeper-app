@@ -44,6 +44,14 @@ async function show() {
   $("goal").textContent = t.goal;
   $("goal-card").classList.toggle("hidden", !t.goal);
   $("exam-box").classList.toggle("hidden", !!t.exam);
+  // The calendar offer: one click starts exam mode until the exam; it never starts by itself.
+  $("offer").classList.toggle("hidden", !t.offer);
+  if (t.offer) {
+    const when = new Date(t.offer.start).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+    $("offer-text").textContent = `${t.offer.title}, ${when}. Start exam mode until then?`;
+    $("offer-start").onclick = async () => { await ask("startExam", { until: t.offer.start, goal: t.offer.title, source: "calendar" }); show(); };
+    $("offer-no").onclick = async () => { await ask("dismissOffer", { offer: t.offer }); show(); };
+  }
   if (t.exam) { $("mode").textContent = `Exam mode until ${clock(t.exam.until)}`; $("mode").className = "pill closed"; }
   else if (blind && blind.length) { $("mode").textContent = "Check site access"; $("mode").className = "pill warn"; }
   else if (t.waiting) { $("mode").textContent = "Change tomorrow"; $("mode").className = "pill warn"; }
@@ -74,7 +82,7 @@ $("exam-start").addEventListener("click", () => {
   $("exam-box").replaceChildren(examForm((r) => {
     if (r.ok) show().then(() => $("exam-box").classList.add("hidden"));
     else $("exam-box").append(el("div", { class: "small muted" }, r.refused === "bad_until" ? "Pick a time ahead." : "Not saved."));
-  }));
+  }, "today"));
   $("exam-until").focus();
 });
 

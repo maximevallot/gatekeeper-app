@@ -113,5 +113,5 @@ test("every request and answer is logged on the device, and the week counts them
 
 test("Claude help's list of what is sent names the loosening request, and its version went up", () => {
   assert.ok(WHATS_SENT.some((w) => /loosen/i.test(w.what) && /reason/.test(w.sent)));
-  assert.equal(CONSENT.help, 2);
+  assert.ok(CONSENT.help >= 2);
 });

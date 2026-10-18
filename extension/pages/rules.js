@@ -221,7 +221,7 @@ $("exam-start").addEventListener("click", () => {
     saved(r.ok ? `Exam mode is on until ${when(r.exam.until)}` : r.refused === "bad_until" ? "Pick a time ahead" : "Not saved");
     $("exam-start-box").replaceChildren();
     await load();
-  }));
+  }, "rules"));
   $("exam-until").focus();
 });
 
@@ -273,6 +273,36 @@ $("loosen-form").addEventListener("submit", async (e) => {
   $("loosen-card").classList.add("hidden");
 });
 
+// ---------- the calendar link ----------
+
+function renderCalendar() {
+  const c = got.state.calendar;
+  $("calendar-sub").textContent = !c
+    ? "Paste a calendar link once, and exam mode offers itself before an exam. It's read on this computer only."
+    : c.error ? `Couldn't read the calendar (${c.error}).`
+    : `Connected: ${c.events.length} event${c.events.length === 1 ? "" : "s"} in the next two weeks. Read on this computer once a day.`;
+  $("calendar-edit").textContent = c ? "Disconnect" : "Connect";
+}
+$("calendar-edit").addEventListener("click", async () => {
+  if (got.state.calendar) { await ask("setCalendar", { url: null }); await load(); return; }
+  $("calendar-form").classList.toggle("hidden");
+  $("calendar-url").focus();
+});
+$("calendar-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const raw = $("calendar-url").value.trim().replace(/^webcals?:\/\//i, "https://");
+  let origin;
+  try { origin = new URL(raw).origin; } catch { saved("That isn't a calendar link"); return; }
+  // Reading the link needs the browser's yes for that one site, asked inside the click.
+  chrome.permissions.request({ origins: [origin + "/*"] }).then(async (granted) => {
+    if (!granted) { saved("Not connected: Gatekeeper needs to read that site"); return; }
+    const r = await ask("setCalendar", { url: raw }).catch(() => ({ refused: "unreachable" }));
+    saved(r.refused ? "Not connected" : r.error ? `Connected, but couldn't read it yet (${r.error})` : `Connected: ${r.events} events`);
+    $("calendar-form").classList.add("hidden");
+    await load();
+  });
+});
+
 // ---------- the Mac app ----------
 
 const NATIVE = { permissions: ["nativeMessaging"] };
@@ -309,6 +339,7 @@ async function load() {
   renderExam();
   renderMac();
   renderLoosen();
+  renderCalendar();
 }
 
 checkWorker();

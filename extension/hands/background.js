@@ -60,6 +60,22 @@ async function withheldDomains() {
   return all ? [] : engine.watchedDomains(state).filter((d) => !covered(d));
 }
 
+// ---------- the calendar link ----------
+
+/** Read the pasted calendar link, at most once a day (or now, `force`). Nothing from it is sent anywhere. */
+async function readCalendar(force = false) {
+  const s = await load();
+  if (!s.calendar || (!force && !engine.calendarDue(s, Date.now()))) return;
+  try {
+    const res = await fetch(s.calendar.url, { credentials: "omit", cache: "no-store" });
+    if (!res.ok) throw new Error("http_" + res.status);
+    const text = (await res.text()).slice(0, 2_000_000);
+    await update((st) => ({ state: engine.recordCalendar(st, text, Date.now()) }));
+  } catch (e) {
+    await update((st) => ({ state: engine.calendarFailed(st, (e && e.message) || "unreachable", Date.now()) }));
+  }
+}
+
 // ---------- Gatekeeper for Mac (native messaging, contract version 1) ----------
 
 const MAC_HOST = "com.gatekeeper.helper";
@@ -318,10 +334,23 @@ const handlers = {
   },
   // The watch week: start it from the welcome tab, end it early with one tap, and mark its summary seen.
   // Start exam mode, or move its end later: a tightening, at once.
-  async startExam({ until, goal }) {
-    const out = await update((s) => engine.startExam(s, { until, goal }, Date.now()));
+  async startExam({ until, goal, source }) {
+    const from = ["today", "rules", "calendar"].includes(source) ? source : "extension";
+    const out = await update((s) => engine.startExam(s, { until, goal, source: from }, Date.now()));
     macSync(true);
     return { ok: !out.refused, refused: out.refused, exam: out.exam };
+  },
+  // The calendar link: kept on this device and read here once a day; the page asked the browser for the site.
+  async setCalendar({ url }) {
+    const out = await update((s) => engine.setCalendar(s, url));
+    if (out.refused) return { refused: out.refused };
+    if (out.url) await readCalendar(true);
+    const c = state.calendar;
+    return { ok: true, events: c ? c.events.length : 0, error: c && c.error };
+  },
+  async dismissOffer({ offer }) {
+    await update((s) => ({ state: engine.dismissOffer(s, offer) }));
+    return { ok: true };
   },
   // Ending exam mode early: a request to the agent, or a reason why nothing is asked (decision 3).
   async endExam() {
@@ -400,6 +429,7 @@ chrome.windows.onFocusChanged.addListener(tick);
 // browser calls every two seconds keep the worker alive.
 chrome.alarms.create("tick", { periodInMinutes: 0.5 });
 chrome.alarms.create("mac", { periodInMinutes: 1 }); // the Mac app's heartbeat, and its requests
-chrome.alarms.onAlarm.addListener((a) => (a.name === "mac" ? macSync(true) : tick()));
+chrome.alarms.create("calendar", { periodInMinutes: 60 }); // the calendar link, read once a day
+chrome.alarms.onAlarm.addListener((a) => (a.name === "mac" ? macSync(true) : a.name === "calendar" ? readCalendar() : tick()));
 setInterval(tick, TICK_MS);
 update((s) => ({ state: engine.rollover(s, Date.now()) }));

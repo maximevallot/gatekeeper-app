@@ -17,6 +17,13 @@
     <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="flex: none"><circle cx="12" cy="12" r="9" fill="none" stroke="var(--accent)" stroke-width="2"></circle><circle cx="12" cy="12" r="4" fill="none" stroke="var(--accent)" stroke-width="2"></circle></svg>
     <div id="goal" style="font-size: 15px; font-weight: 500"></div>
   </div>
+  <div class="soft hidden" id="offer" style="display: flex; flex-direction: column; gap: 10px">
+    <div id="offer-text" style="font-size: 15px; font-weight: 500"></div>
+    <div style="display: flex; gap: 8px">
+      <button class="btn" type="button" id="offer-start" style="height: 40px; flex: 1">Start exam mode</button>
+      <button class="btn ghost" type="button" id="offer-no" style="height: 40px">Not now</button>
+    </div>
+  </div>
   <div id="exam-box">
     <button class="btn ghost wide" type="button" id="exam-start" style="height: 44px">Start exam mode</button>
   </div>

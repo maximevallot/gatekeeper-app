@@ -22,6 +22,7 @@
 // user agreed to (CONSENT); when what is sent changes, the version goes up and the user is asked again.
 
 import { KINDS, hostOf, matches } from "./catalog.js";
+import { calendarUrl, parseIcs, EXAM_WORDS } from "./calendar.js";
 import {
   MAX_JUDGED, videoKeyOf, videoSiteOf, videoRulesKey, videoName, cleanVideos, tightenVideos,
   describeVideoChanges, matchWords, applyDiff, rulesForChat,
@@ -44,19 +45,19 @@ export const MAX_ALLOWED_VIDEOS = 50; // judged videos given a rule of their own
 
 // The version of each consent text. Raise one when what that switch sends changes: the user is asked again.
 // talk: the gate. sorting: unknown sites. chat: the rules chat. judge: video rules judged by Claude.
-export const CONSENT = { talk: 1, sorting: 1, chat: 1, judge: 1, help: 2 };
+export const CONSENT = { talk: 1, sorting: 1, chat: 1, judge: 1, help: 3 };
 
 // "Claude help": one yes for everything below. Raise CONSENT.help whenever this list changes, so the user is
 // asked again. The pages show this list, word for word, before the first request.
 export const HELP_COVERS = ["talk", "chat", "judge", "sorting"];
 export const WHATS_SENT = [
-  { what: "The gate", sent: "the site's name (not its address) and kind, today's minutes and budget for that kind, your goal sentence, and what you type", when: "when you ask the gate for time" },
-  { what: "Changing rules by talking", sent: "what you type, the earlier messages of that talk, your rules (no usage), and today's date", when: "when you send a message" },
+  { what: "The gate", sent: "the site's name (not its address) and kind, today's minutes and budget for that kind, your goal sentence, exam mode if it's on, the titles and dates of your next few calendar events if you connected a calendar, and what you type", when: "when you ask the gate for time" },
+  { what: "Changing rules by talking", sent: "what you type, the last six messages of your talk with Gatekeeper, your rules (no usage), exam mode if it's on, and the date and time", when: "when you send a message" },
   { what: "Asking to loosen a rule", sent: "the change in words, your goal sentence, and your reason as you type it", when: "when you loosen a rule or end exam mode early" },
   { what: "Video rules", sent: "a YouTube video's title and channel, and the wording of your video rules", when: "once per video you open, when you have video rules" },
   { what: "Sorting new sites", sent: "the site's name and page title", when: "once per site Gatekeeper doesn't know, after a minute on it" },
 ];
-export const SENT_TO = "Each request also carries a random install number. It goes to Gatekeeper's relay, which asks Anthropic's Claude and keeps none of it. Nothing else leaves this browser: never page content, addresses, or other tabs.";
+export const SENT_TO = "Each request also carries a random install number. It goes to Gatekeeper's relay, which asks Anthropic's Claude and keeps none of it. Nothing else leaves this browser: never page content, addresses, or other tabs. Your talk with Gatekeeper and your calendar link are kept on this device.";
 
 export function initialState() {
   return {
@@ -83,6 +84,7 @@ export function initialState() {
     log: [], // one history log, on this device: rules, loosening, passes, refusals, exam starts and ends
     loosen: null, // the loosening waiting for its reason; others wait in loosenQueue
     loosenQueue: [],
+    calendar: null, // { url, events: [{ title, start }], fetchedAt, error }: a calendar link, read on this device
   };
 }
 
@@ -311,7 +313,7 @@ export function todaySummary(state, now) {
   } : null;
   const exam = examOn(s) ? { ...s.rules.exam } : null;
   if (exam) for (const k of kinds) { k.status = "closed"; k.exam = true; }
-  return { kinds, goal: s.goal || "", reopensAt: s.usage.endsAt, setupDone: !!s.setupDone, waiting: !!s.pending, watch, watchReady: watchReady(s), exam };
+  return { kinds, goal: s.goal || "", reopensAt: s.usage.endsAt, setupDone: !!s.setupDone, waiting: !!s.pending, watch, watchReady: watchReady(s), exam, offer: examOffer(s, now) };
 }
 
 const usedSeconds = (s, kind) => s.usage.seconds[kind] || 0;
@@ -737,7 +739,7 @@ export function gateRequest(state, { url, message, now }) {
   return {
     payload: {
       installId: s.installId, goal: s.goal || "", site: siteDomain(url), kind: d.kind,
-      minutesUsed: Math.min(d.usedMinutes || 0, 1440), budget: d.budgetMinutes ?? 0, deadlines: [],
+      minutesUsed: Math.min(d.usedMinutes || 0, 1440), budget: d.budgetMinutes ?? 0, deadlines: deadlines(s, t),
       // In exam mode the gate gives a pass only for a page that serves the exam (shared name, one-model step 1).
       exam: d.exam ? { until: d.exam.until, goal: d.exam.goal || "" } : null,
       message: text.slice(0, MAX_MESSAGE),
@@ -1128,4 +1130,65 @@ export function dropCard(state, now) {
 /** "Forget this talk": the thread and its card are cleared. */
 export function forgetThread(state) {
   return { ...state, thread: { turns: [], card: null } };
+}
+
+// ---------- the calendar ----------
+// A calendar link the user pastes once, read on this device once a day (the hands fetch it). Its events give
+// the exam offer on Today and the Mac, and the gate's deadlines. The link and the events never leave the
+// device, except the next few events' titles and dates, sent to the gate with a message (Claude help).
+
+export const CALENDAR_EVERY_MS = 24 * 3600e3;
+export const OFFER_AHEAD_MS = 48 * 3600e3;
+
+export function setCalendar(state, raw) {
+  if (raw === null || raw === "") return { state: { ...state, calendar: null } };
+  const url = calendarUrl(raw);
+  if (!url) return { state, refused: "bad_url" };
+  return { state: { ...state, calendar: { url, events: [], fetchedAt: 0, error: null } }, url };
+}
+
+/** Whether the calendar should be read again now. */
+export function calendarDue(state, now) {
+  const c = state.calendar;
+  return !!c && Math.max(now, (state.clock && state.clock.floor) || 0) - (c.fetchedAt || 0) >= CALENDAR_EVERY_MS;
+}
+
+/** The feed's text, read by the hands: keep the events of the next 14 days. */
+export function recordCalendar(state, text, now) {
+  const c = state.calendar;
+  if (!c) return state;
+  const t = Math.max(now, (state.clock && state.clock.floor) || 0);
+  const events = parseIcs(text).filter((e) => e.start >= t - 3600e3 && e.start <= t + 14 * 86400e3).slice(0, 50).map(({ title, start }) => ({ title, start }));
+  return { ...state, calendar: { ...c, events, fetchedAt: t, error: null } };
+}
+
+export function calendarFailed(state, error, now) {
+  const c = state.calendar;
+  if (!c) return state;
+  const t = Math.max(now, (state.clock && state.clock.floor) || 0);
+  return { ...state, calendar: { ...c, fetchedAt: t, error: String(error).slice(0, 80) } };
+}
+
+/** The next deadlines for the gate: up to five, title and date. */
+export function deadlines(state, t) {
+  const c = state.calendar;
+  if (!c) return [];
+  return c.events.filter((e) => e.start >= t).slice(0, 5).map((e) => ({ title: e.title, due: localIso(e.start).slice(0, 10) }));
+}
+
+/** "Midterm 15.425, Wed 8:30. Start exam mode until then?": an exam in the next 48 hours, offered once. */
+export function examOffer(state, now) {
+  const s = rollover(state, now);
+  const c = s.calendar;
+  if (!c || examOn(s)) return null;
+  const t = s.clock.floor;
+  const dismissed = new Set(s.offersDismissed || []);
+  const e = c.events.find((x) => x.start > t && x.start - t <= OFFER_AHEAD_MS && EXAM_WORDS.test(x.title) && !dismissed.has(x.title + "@" + x.start));
+  return e ? { title: e.title, start: e.start } : null;
+}
+
+/** "Not now" on the offer: it is not shown again for that event. */
+export function dismissOffer(state, offer) {
+  if (!offer) return state;
+  return { ...state, offersDismissed: [...(state.offersDismissed || []), offer.title + "@" + offer.start].slice(-50) };
 }
