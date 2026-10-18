@@ -50,14 +50,14 @@ export const MAX_ALLOWED_VIDEOS = 50; // judged videos given a rule of their own
 
 // The version of each consent text. Raise one when what that switch sends changes: the user is asked again.
 // talk: the gate. sorting: unknown sites. chat: the rules chat. judge: video rules judged by Claude.
-export const CONSENT = { talk: 1, sorting: 1, chat: 1, judge: 1, help: 3 };
+export const CONSENT = { talk: 1, sorting: 1, chat: 2, judge: 1, help: 4 };
 
 // "Claude help": one yes for everything below. Raise CONSENT.help whenever this list changes, so the user is
 // asked again. The pages show this list, word for word, before the first request.
 export const HELP_COVERS = ["talk", "chat", "judge", "sorting"];
 export const WHATS_SENT = [
   { what: "The gate", sent: "the site's name (not its address) and kind, today's minutes and budget for that kind, your goal sentence, exam mode if it's on, the titles and dates of your next few calendar events if you connected a calendar, and what you type", when: "when you ask the gate for time" },
-  { what: "Changing rules by talking", sent: "what you type, the last six messages of your talk with Gatekeeper, your rules (no usage), exam mode if it's on, and the date and time", when: "when you send a message" },
+  { what: "Changing rules by talking", sent: "what you type, the last six messages of your talk with Gatekeeper, your rules (no usage), exam mode if it's on, the date and time, and whether a calendar is connected and when it was last read (never its link or events)", when: "when you send a message" },
   { what: "Asking to loosen a rule", sent: "the change in words, your goal sentence, and your reason as you type it", when: "when you loosen a rule or end exam mode early" },
   { what: "Video rules", sent: "a YouTube video's title and channel, and the wording of your video rules", when: "once per video you open, when you have video rules" },
   { what: "Sorting new sites", sent: "the site's name and page title", when: "once per site Gatekeeper doesn't know, after a minute on it" },
@@ -1264,8 +1264,8 @@ export function chatRequest(state, { message, history = [], now }) {
       // A no holds every loosening until the morning: the relay then drops loosening ops and says so (QA round 3, N1).
       // A no now holds only its own rule (2026-10-18), so loosening as a whole is never locked; the card says which.
       loosenLocked: false,
-      // So "are you connected to my calendar?" gets a true answer (Maxime's re-test): the state only. Off until the
-      // privacy policy's chat row lists it (/privacy/0.2 doesn't); the relay then says it can't see the calendar.
+      // So "are you connected to my calendar?" gets a true answer (Maxime's re-test): the state only, as the
+      // privacy policy's chat row (/privacy/0.2, 18 October) and What's sent say.
       ...(SEND_CALENDAR_STATUS ? { calendar: calendarStatus(s) } : {}),
     },
   };
@@ -1635,8 +1635,8 @@ export function calendarFailed(state, error, now) {
   return { ...state, calendar: { ...c, fetchedAt: t, error: String(error).slice(0, 80) } };
 }
 
-/** Send the calendar's state to the chat. Turn on once the privacy policy's chat row says "whether a calendar is connected". */
-export const SEND_CALENDAR_STATUS = false;
+/** Send the calendar's state to the chat: on since /privacy/0.2's chat row says "whether you connected a calendar". */
+export const SEND_CALENDAR_STATUS = true;
 
 /**
  * The calendar's state for the chat (/rules, the relay's names): connected, failed or none, and when it was last read

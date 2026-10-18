@@ -57,7 +57,7 @@ test("the calendar is read again once a day; Claude help's list says what goes t
   assert.ok(calendarDue(withCal(), MON + 25 * 3600e3));
   assert.ok(/calendar/.test(WHATS_SENT.find((w) => w.what === "The gate").sent));
   assert.ok(/exam mode/.test(WHATS_SENT.find((w) => /talking/.test(w.what)).sent));
-  assert.equal(CONSENT.help, 3);
+  assert.equal(CONSENT.help, 4); // 4: the chat also sends whether a calendar is connected (2026-10-18)
 });
 
 test("Maxime's re-test: a Google share link is refused with Google's steps; a page that isn't a feed is said, not read as empty", async () => {
