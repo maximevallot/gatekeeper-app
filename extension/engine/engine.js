@@ -31,11 +31,11 @@ import {
 
 export const DEFAULT_MINUTES = 15;
 export const DEFAULT_DAY_START = 4; // the day, and every budget, turns over at 4:00
-export const MAX_TICK_SECONDS = 5;
+export const MAX_TICK_SECONDS = 5; // one report never counts more than this, so a sleeping laptop costs nothing
 export const MAX_JUMP_MS = 15 * 60e3; // a clock change bigger than this, between two reads, is checked before it counts
 export const MAX_DRIFT_MS = 2 * 60e3; // the clock running away from monotonic time by this much, in small steps, is checked too
 export const GAP_GRACE_MS = 20e3; // after sleep or a closed browser, the day takes the clock's word if the relay doesn't answer in this long
-export const UNDO_MS = 60e3; // a change on the rules page can be undone for this long, without the agent // one report never counts more than this, so a sleeping laptop costs nothing
+export const UNDO_MS = 10 * 60e3; // after a tightening, going back up to what was before applies at once for this long (2026-10-18)
 export const SORT_AFTER_SECONDS = 60; // an unknown site is sorted once it has been in front this long
 export const SORT_RETRY_MS = 3600e3; // after a failed sort, wait an hour before asking again
 export const PASS_LADDER = [10, 5, 2]; // the longest first, second and third pass for a kind in one day; then none
@@ -998,11 +998,23 @@ export function proposeRules(state, next, now, { source = "extension", undoable 
   // A stray tap on the rules page is undone for free (QA round 2, first-run H3): for a minute after a change
   // there, the rules from before it count as the rules in force, so going back to them applies now.
   const undo = undoable && s.undo && s.undo.until > t ? s.undo : null;
-  const applied = tighten(undo ? undo.rules : s.rules, want, s);
+  // Only the rules that tightening changed may go back; everything else is judged against the rules in force.
+  let applied = tighten(s.rules, want, s);
+  if (undo && (undo.targets || []).length) {
+    // Each rule goes back only if that loosens it: the way back never makes anything stricter than it is now.
+    const back = tighten(undo.rules, want, s);
+    for (const tg of undo.targets) {
+      const cand = revertTargets(applied, back, [tg]);
+      if (same(tighten(cand, applied, s), applied)) applied = cand;
+    }
+  }
   const nowChanges = describeChanges(s.rules, applied);
   const logged = (st, later = []) => (nowChanges.length || later.length
     ? { ...st, log: logEvent(st, "rules", { now: nowChanges.map((c) => c.text), later: later.map((c) => c.text), source }) } : st);
-  const tightened = undoable && nowChanges.length && !undo ? { rules: s.rules, until: t + UNDO_MS } : undo;
+  const targets = nowChanges.map((c) => c.target).filter(Boolean);
+  const tightened = undoable && nowChanges.length
+    ? undo ? { ...undo, targets: [...new Set([...(undo.targets || []), ...targets])] } : { rules: s.rules, targets, until: t + UNDO_MS }
+    : undo;
   const base0 = { ...s, rules: applied, undo: tightened || null };
   if (same(applied, want)) {
     return { state: logged(withoutLoosen({ ...base0, rules: want, pending: null }, "rules")), now: nowChanges, later: [], from: null, undo: !!tightened };
@@ -1287,9 +1299,9 @@ export function chatPreview(state, answer, now) {
     if (asked.until <= s.clock.floor) { rules.exam = had || null; skipped.push({ op: "examStart" }); }
     else rules.exam = { ...asked, until: Math.min(asked.until, s.clock.floor + MAX_EXAM_DAYS * 86400e3) };
   }
-  const r = proposeRules(s, rules, now);
+  const r = proposeRules(s, rules, now, { undoable: true });
   // Only what this answer changes: a loosening already waiting for the morning is not shown again.
-  const before = proposeRules(s, wantedRules(s), now);
+  const before = proposeRules(s, wantedRules(s), now, { undoable: true });
   const fresh = (list, old) => { const seen = new Set(old.map((c) => c.text)); return list.filter((c) => !seen.has(c.text)); };
   // A loosening the agent will be asked about is tagged so on the card ("asks you why"), not "tomorrow".
   const nowChanges = fresh(r.now, before.now), later = fresh(r.later, before.later).map((c) => ({ ...c, agent: !!r.needsOk }));
@@ -1397,7 +1409,9 @@ export function dropLoosen(state, now) {
   if (!l) return s;
   if (l.kind === "rules") {
     const p = s.pending;
-    s = { ...s, pending: p && p.approved ? { rules: p.approved, from: p.from, key: p.key, ok: true } : p && p.ok ? p : null };
+    const kept = p && p.approved ? { rules: p.approved, from: p.from, key: p.key, ok: true } : p && p.ok ? p : null;
+    // A waiting change that is only the rules in force waits for nothing.
+    s = { ...s, pending: kept && describeChanges(s.rules, kept.rules).length ? kept : null };
   }
   s = addTurn(withoutLoosen(s, l.kind), "note", l.kind === "exam" ? "Exam mode stays on." : "That change is dropped; nothing loosens.", now);
   return { ...s, log: logLoosen(s, { kind: l.kind, changes: l.changes, decision: "dropped" }) };
@@ -1547,7 +1561,7 @@ export function applyCard(state, now) {
   if (!card) return { state: s, refused: "no_card" };
   const p = chatPreview(s, card.answer, now);
   if (p.error) return { state: s, refused: p.error };
-  const r = proposeRules(s, p.rules, now, { source: "talk" });
+  const r = proposeRules(s, p.rules, now, { source: "talk", undoable: true });
   s = r.state;
   let text;
   let exam = null;

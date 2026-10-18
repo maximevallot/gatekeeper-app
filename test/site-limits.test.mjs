@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   initialState, completeSetup, setHelp, chatRequest, chatPreview, recordChatAnswer, applyCard, addTurn, proposeRules,
-  decide, tick, enforcement, todaySummary, startExam, gateRequest, applyGateAnswer, describeChanges, recordSort, upgrade,
+  decide, tick, enforcement, todaySummary, startExam, gateRequest, applyGateAnswer, describeChanges, recordSort, upgrade, rollover,
 } from "../extension/engine/engine.js";
 import { applyDiff } from "../extension/engine/videos.js";
 import { buildRules } from "../extension/hands/blocker.js";
@@ -82,7 +82,8 @@ test("\"make it 30\" and \"only in exam mode\" right after the card replace it a
 });
 
 test("once applied, more time is a loosening the agent decides; less applies now", () => {
-  let s = applyCard(say(setUp(), "limit lequipe", { reply: "ok", diff: [{ op: "siteLimit", domain: "lequipe.fr", minutes: 15 }] }).state, MON).state;
+  // Eleven minutes on: past the ten minutes in which going back to before (no limit at all) would apply at once.
+  let s = rollover(applyCard(say(setUp(), "limit lequipe", { reply: "ok", diff: [{ op: "siteLimit", domain: "lequipe.fr", minutes: 15 }] }).state, MON).state, MON + 11 * 60e3);
   let r = say(s, "make it 30", { reply: "lequipe.fr: 30 minutes a day.", diff: [{ op: "siteLimit", domain: "lequipe.fr", minutes: 30 }] });
   assert.deepEqual(r.preview.later.map((c) => c.text), ["lequipe.fr: 15 → 30 min a day"]);
   const a = applyCard(r.state, MON);

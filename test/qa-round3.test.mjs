@@ -193,3 +193,21 @@ test("tester run, #2: a rule set during the watch week ends the week, so \"It ap
   assert.deepEqual(r.now.map((c) => c.text), ["Video: 20 min a day"]);
   assert.deepEqual(todaySummary(r.state, SAT + 60e3).kinds.map((k) => k.kind), ["video"], "Video shows on Today at once");
 });
+
+test("tester run, #7: 15 → 10 → \"actually no, 20\" within ten minutes: back up to 15 at once, the rest asks the agent", async () => {
+  const s = setUp({ video: 15 });
+  const down = proposeRules(s, { ...s.rules, kinds: { video: { minutes: 10 } } }, SAT, { undoable: true }).state;
+  assert.equal(down.rules.kinds.video.minutes, 10);
+  const up = proposeRules(down, { ...down.rules, kinds: { video: { minutes: 20 } } }, SAT + 8 * 60e3, { undoable: true });
+  assert.equal(up.state.rules.kinds.video.minutes, 15, "back to 15 at once");
+  assert.equal(up.needsOk, true, "15 → 20 is a loosening for the agent");
+  const late = proposeRules(down, { ...down.rules, kinds: { video: { minutes: 15 } } }, SAT + 11 * 60e3, { undoable: true });
+  assert.equal(late.state.rules.kinds.video.minutes, 10, "after ten minutes, a loosening like any other");
+  // The same from the chat: the card and Apply both know the way back.
+  const ans = { reply: "Video: 20 minutes a day.", diff: [{ op: "budget", kind: "video", minutes: 20 }] };
+  const p = chatPreview(down, ans, SAT + 60e3);
+  assert.deepEqual(p.now.map((c) => c.text), ["Video: 10 min a day → 15 min a day"]);
+  const rec = recordChatAnswer(down, ans, p, SAT + 60e3);
+  const ap = applyCard(rec, SAT + 61e3);
+  assert.equal(ap.state.rules.kinds.video.minutes, 15);
+});

@@ -160,8 +160,8 @@ test("#16 (first-run H3): one stray tap on − is undone from the rules page wit
   const back = proposeRules(closed.state, { ...closed.state.rules, kinds: { video: { minutes: 5 } } }, SAT + 20e3, { undoable: true });
   assert.equal(back.state.rules.kinds.video.minutes, 5, "the + within a minute undoes it now");
   assert.equal(back.needsOk, undefined);
-  const late = proposeRules(closed.state, { ...closed.state.rules, kinds: { video: { minutes: 5 } } }, SAT + 61e3, { undoable: true });
-  assert.equal(late.state.rules.kinds.video.minutes, 0, "after a minute, it is a loosening like any other");
+  const late = proposeRules(closed.state, { ...closed.state.rules, kinds: { video: { minutes: 5 } } }, SAT + 10 * 60e3 + 1000, { undoable: true });
+  assert.equal(late.state.rules.kinds.video.minutes, 0, "after ten minutes (one before 2026-10-18), it is a loosening like any other");
   assert.equal(late.needsOk, true);
   const further = proposeRules(closed.state, { ...closed.state.rules, kinds: { video: { minutes: 30 } } }, SAT + 20e3, { undoable: true });
   assert.equal(further.state.rules.kinds.video.minutes, 5, "undo goes back to before the tap, no further");
