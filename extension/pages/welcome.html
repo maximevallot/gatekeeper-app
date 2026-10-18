@@ -9,7 +9,7 @@
 </head>
 <body>
 <main class="page narrow">
-  <div id="watch" style="display: flex; flex-direction: column; gap: 32px">
+  <div id="watch" class="hidden" style="display: flex; flex-direction: column; gap: 32px">
     <div class="section" style="gap: 8px">
       <div class="eyebrow">Gatekeeper</div>
       <h1 class="title">First, a week of just watching</h1>
@@ -20,12 +20,12 @@
       <input class="field" id="watch-goal" maxlength="300" placeholder="Finish problem set 4 by Thursday" autocomplete="off">
     </div>
     <div class="row" style="padding: 0">
-      <button class="link" type="button" id="skip-watch">Skip: set limits now</button>
+      <button class="link" type="button" id="skip-watch">Set limits now instead</button>
       <button class="btn" type="button" id="start-watch">Start watching</button>
     </div>
   </div>
 
-  <div id="ask" class="hidden" style="display: flex; flex-direction: column; gap: 32px">
+  <div id="ask" style="display: flex; flex-direction: column; gap: 32px">
     <div class="section" style="gap: 8px">
       <div class="eyebrow">Gatekeeper</div>
       <h1 class="title" id="ask-title">Set it up in a minute</h1>
@@ -60,7 +60,7 @@
     </div>
 
     <div class="row" style="padding: 0">
-      <span class="small muted">Next: private windows (one switch).</span>
+      <button class="link small" type="button" id="watch-first">Just watch for a week first</button>
       <button class="btn" id="start" disabled>Start</button>
     </div>
   </div>

@@ -988,7 +988,9 @@ export function minutesText(m) {
  * Returns { state, now: [changes applied], later: [changes waiting], from }.
  */
 export function proposeRules(state, next, now, { source = "extension", undoable = false } = {}) {
-  const s = rollover(state, now);
+  let s = rollover(state, now);
+  // A rule set during the watch week (by chat or on the rules page) ends the week, so it applies as said.
+  if (watching(s) && !same(cleanRules({ dayStart: s.rules.dayStart, ...next }, s.rules), s.rules)) s = endWatch(s, now);
   const t = s.clock.floor;
   const want = cleanRules({ dayStart: s.rules.dayStart, ...next }, s.rules);
   // Exam mode in force is never ended or shortened by a rule change; only endExam (the agent) does that.

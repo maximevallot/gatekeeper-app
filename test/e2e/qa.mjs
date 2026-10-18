@@ -47,6 +47,8 @@ try {
   // Welcome: video 15 minutes, Claude off.
   const p = await connect((t) => t.type === "page" && t.url.endsWith("/pages/welcome.html"));
   await sleep(800);
+  check("tester #2: the welcome starts with rules; watching first is the small second choice",
+    !(await p.evaluate(`document.getElementById('ask').classList.contains('hidden')`)) && (await p.evaluate(`document.getElementById('watch').classList.contains('hidden')`)) && !!(await p.evaluate(`document.getElementById('watch-first')`)));
   await p.evaluate(`document.querySelector('.kind[data-kind=video]').click()`);
   await sleep(300);
   await p.evaluate(`document.getElementById('start').click()`);

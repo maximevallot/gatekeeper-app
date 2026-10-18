@@ -26,6 +26,12 @@ const minutesStepper = stepper({ value: minutes, big: true, max: 240, onChange: 
 $("minutes").append(minutesStepper);
 
 // The watch week: count only, block nothing, for seven days. "Skip" goes straight to the three questions.
+// Rules from day 0 are the default (2026-10-18); a week of only watching is the small second choice.
+$("watch-first").addEventListener("click", () => {
+  $("watch-goal").value = $("goal").value;
+  $("ask").classList.add("hidden");
+  $("watch").classList.remove("hidden");
+});
 $("skip-watch").addEventListener("click", () => {
   $("goal").value = $("watch-goal").value;
   $("watch").classList.add("hidden");
@@ -49,6 +55,8 @@ async function fromWatch() {
   const b = baseline(state, now);
   $("watch").classList.add("hidden");
   $("ask").classList.remove("hidden");
+  // Before a whole day has been watched there is no week to set limits from: the plain questions.
+  if (!b.days) { $("goal").value = state.goal || ""; return; }
   $("ask-title").textContent = "Set limits from your week";
   $("ask-lead").textContent = b.kinds.length
     ? "Last week, a day: " + b.kinds.map((k) => `${k.label.toLowerCase()} ${k.perDay} min`).join(", ") + ". Here's a start at half."

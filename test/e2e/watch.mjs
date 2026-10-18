@@ -27,8 +27,8 @@ try {
     { stdio: "ignore" });
   const p = await connect((t) => t.type === "page" && t.url.endsWith("/pages/welcome.html"));
   await sleep(800);
-  check("the welcome tab starts with the watch week", /just watching/.test(await p.evaluate(`document.querySelector('#watch h1').textContent`)));
-  await p.evaluate(`document.getElementById('watch-goal').value = 'Finish problem set 4'; document.getElementById('start-watch').click()`);
+  check("the welcome tab still offers the watch week", /just watching/.test(await p.evaluate(`document.querySelector('#watch h1').textContent`)));
+  await p.evaluate(`document.getElementById('watch-first').click(); document.getElementById('watch-goal').value = 'Finish problem set 4'; document.getElementById('start-watch').click()`);
   await sleep(800);
   const sw = await connect((t) => t.type === "service_worker");
   const st = () => sw.evaluate(`chrome.storage.local.get('state').then(r => r.state)`);
@@ -46,7 +46,8 @@ try {
   check("Today offers to set limits now", /Set limits now/.test(await p.evaluate(`document.getElementById('change').textContent`)));
 
   await p.send("Page.navigate", { url: base + "/pages/welcome.html?after=watch" }); await sleep(1000);
-  check("setting limits starts from the week", /Set limits from your week/.test(await p.evaluate(`document.getElementById('ask-title').textContent`)));
+  // Day 1 of the week has no day to start from: the plain questions, not "your week showed no time" (tester run, #2).
+  check("setting limits on day 1 asks the plain questions", /Set it up in a minute/.test(await p.evaluate(`document.getElementById('ask-title').textContent`)));
   await p.evaluate(`document.querySelector('.kind[data-kind=video]').click();
     for (let i = 0; i < 3; i++) document.querySelector('#minutes [data-step="-1"]').click();
     document.getElementById('start').click();`);

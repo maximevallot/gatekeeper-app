@@ -183,3 +183,13 @@ test("tester run, #1: exam mode never strands a student from study: search pages
   assert.equal(decide(y, { url: "https://studyhall.example/notes", now: SAT + 130e3 }).verdict, "allow", "it opens now");
   assert.ok(examOn(y));
 });
+
+test("tester run, #2: a rule set during the watch week ends the week, so \"It applies now\" is true", async () => {
+  const { startWatch, watching, todaySummary } = await import("../extension/engine/engine.js");
+  let s = startWatch(setUp({}, false), { goal: "x" }, SAT);
+  assert.ok(watching(s));
+  const r = proposeRules(s, { ...s.rules, kinds: { video: { minutes: 20 } } }, SAT + 60e3);
+  assert.ok(!watching(r.state), "the watch week ended");
+  assert.deepEqual(r.now.map((c) => c.text), ["Video: 20 min a day"]);
+  assert.deepEqual(todaySummary(r.state, SAT + 60e3).kinds.map((k) => k.kind), ["video"], "Video shows on Today at once");
+});
