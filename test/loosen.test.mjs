@@ -78,7 +78,7 @@ test("without Claude help, or with the agent out of reach, a loosening waits for
   const u = loosenUnavailable(r.state, { message: "lectures", error: "unreachable", now: MON }).state;
   assert.equal(u.loosen, null);
   assert.equal(rollover(u, TUE).rules.kinds.video.minutes, 45, "nobody is locked in");
-  assert.equal(u.loosenLog.at(-1).decision, "unavailable");
+  assert.equal(u.log.filter((e) => e.type === "loosen").at(-1).decision, "unavailable");
 });
 
 test("ending exam mode early: the agent decides; a yes ends it at once if the exam is done, else the next morning", () => {
@@ -105,7 +105,7 @@ test("every request and answer is logged on the device, and the week counts them
   let s = applyLoosenAnswer(r.state, { answer: no, message: "I just want more", now: MON }).state;
   r = proposeRules(s, { ...s.rules, kinds: { ...s.rules.kinds, social: { minutes: 30 } } }, MON);
   s = applyLoosenAnswer(r.state, { answer: yes, message: "Group project chat lives there this week", now: MON }).state;
-  assert.deepEqual(s.loosenLog.map((e) => [e.decision, e.message]), [["deny", "I just want more"], ["allow", "Group project chat lives there this week"]]);
+  assert.deepEqual(s.log.filter((e) => e.type === "loosen").map((e) => [e.decision, e.message]), [["deny", "I just want more"], ["allow", "Group project chat lives there this week"]]);
   const w = weekSummary(s, MON);
   assert.equal(w.loosenAsked, 2);
   assert.equal(w.loosenAllowed, 1);

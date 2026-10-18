@@ -41,6 +41,9 @@ async function show() {
   if (w.loosenAsked) {
     $("note").before(el("p", { class: "muted", id: "loosen-week" }, `You asked to loosen a rule ${w.loosenAsked} time${w.loosenAsked === 1 ? "" : "s"}; Gatekeeper agreed ${w.loosenAllowed === 0 ? "none" : w.loosenAllowed === w.loosenAsked ? "every time" : w.loosenAllowed + " of them"}.`));
   }
+  if (w.examStarts) {
+    $("note").before(el("p", { class: "muted", id: "exam-week" }, `Exam mode started ${w.examStarts} time${w.examStarts === 1 ? "" : "s"} this week.`));
+  }
   $("note").textContent = w.keptDays < 7
     ? "Kept on this device only. The week fills in from the day this version was installed."
     : "Kept on this device only.";

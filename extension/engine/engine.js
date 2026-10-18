@@ -80,6 +80,9 @@ export function initialState() {
     judging: {}, // "yt:<id>" -> when it was asked: a judgment in flight
     history: [], // one summary per finished day, the last HISTORY_DAYS, on this device only
     thread: { turns: [], card: null }, // the one conversation with Gatekeeper, kept on this device
+    log: [], // one history log, on this device: rules, loosening, passes, refusals, exam starts and ends
+    loosen: null, // the loosening waiting for its reason; others wait in loosenQueue
+    loosenQueue: [],
   };
 }
 
@@ -95,6 +98,11 @@ export function upgrade(state) {
     s.version = 2;
   }
   if (!Array.isArray(s.rules.videos)) s.rules = { ...s.rules, videos: [] };
+  // Earlier versions kept loosening apart (loosenLog); it joins the one log.
+  if (Array.isArray(state.loosenLog) && state.loosenLog.length) {
+    s.log = [...state.loosenLog.map((e) => ({ type: "loosen", ...e })), ...(state.log || [])].slice(-MAX_LOG);
+  }
+  delete s.loosenLog;
   // The switches before consent had versions: a yes then was a yes to version 1 of the text.
   const consent = { ...(s.consent || {}) };
   if (s.talk && !consent.talk) consent.talk = 1;
@@ -276,8 +284,9 @@ export function weekSummary(state, now) {
   return {
     days, minutes: sum("minutes"), allowed: sum("allowed"), gates: sum("gates"), passes: sum("passes"),
     clearDays: kept.filter((d) => d.day !== s.usage.day && !d.gates).length, keptDays: kept.length,
-    loosenAsked: (s.loosenLog || []).filter((e) => e.at > t - 7 * 86400e3 && e.decision !== "ask").length,
-    loosenAllowed: (s.loosenLog || []).filter((e) => e.at > t - 7 * 86400e3 && e.decision === "allow").length,
+    loosenAsked: (s.log || []).filter((e) => e.type === "loosen" && e.at > t - 7 * 86400e3 && e.decision !== "ask").length,
+    loosenAllowed: (s.log || []).filter((e) => e.type === "loosen" && e.at > t - 7 * 86400e3 && e.decision === "allow").length,
+    examStarts: (s.log || []).filter((e) => e.type === "exam.start" && e.at > t - 7 * 86400e3).length,
   };
 }
 
@@ -654,16 +663,17 @@ export function minutesText(m) {
  * Asking again replaces what was waiting, so asking for the rules in force cancels it.
  * Returns { state, now: [changes applied], later: [changes waiting], from }.
  */
-export function proposeRules(state, next, now) {
+export function proposeRules(state, next, now, { source = "extension" } = {}) {
   const s = rollover(state, now);
   const want = cleanRules({ dayStart: s.rules.dayStart, ...next }, s.rules);
   // Exam mode in force is never ended or shortened by a rule change; only endExam (the agent) does that.
   if (examOn(s) && (!want.exam || want.exam.until < s.rules.exam.until)) want.exam = s.rules.exam;
   const applied = tighten(s.rules, want, s);
   const nowChanges = describeChanges(s.rules, applied);
-  const keepExamAsk = s.loosen && s.loosen.kind === "exam" ? s.loosen : null;
+  const logged = (st, later = []) => (nowChanges.length || later.length
+    ? { ...st, log: logEvent(st, "rules", { now: nowChanges.map((c) => c.text), later: later.map((c) => c.text), source }) } : st);
   if (same(applied, want)) {
-    return { state: { ...s, rules: want, pending: null, loosen: keepExamAsk }, now: nowChanges, later: [], from: null };
+    return { state: logged(withoutLoosen({ ...s, rules: want, pending: null }, "rules")), now: nowChanges, later: [], from: null };
   }
   const from = s.usage.endsAt;
   const later = describeChanges(applied, want);
@@ -671,16 +681,17 @@ export function proposeRules(state, next, now) {
   const t = s.clock.floor;
   if (((s.denied || {})[key] || 0) > t) {
     // The agent said no to this today: the same request waits until tomorrow, and the rules stay.
-    return { state: { ...s, rules: applied, pending: null, loosen: keepExamAsk }, now: nowChanges, later: [], from: null, refused: "asked_today", denied: later };
+    return { state: logged(withoutLoosen({ ...s, rules: applied, pending: null }, "rules")), now: nowChanges, later: [], from: null, refused: "asked_today", denied: later };
   }
   // With Claude help on, the agent holds the key: the loosening waits for its yes, then for the morning.
   // Without it, or if it cannot be reached, a loosening waits for the morning only, as before.
   const agent = consented(s, "talk");
   const already = s.pending && s.pending.key === key && s.pending.ok;
   const pending = { rules: want, from, key, ok: already || !agent };
-  const loosen = pending.ok ? keepExamAsk : { kind: "rules", changes: later.map((c) => c.text), key, asked: "" };
+  const base = { ...s, rules: applied, pending };
+  const queued = pending.ok ? withoutLoosen(base, "rules") : withLoosen(base, { kind: "rules", changes: later.map((c) => c.text), key, asked: "" });
   return {
-    state: { ...s, rules: applied, pending, loosen },
+    state: logged(queued, later),
     now: nowChanges, later, from, needsOk: !pending.ok,
   };
 }
@@ -761,6 +772,7 @@ export function applyGateAnswer(state, { url, answer, now }) {
       cooldowns: { ...(s.cooldowns || {}), [kind]: t + minutes * 60e3 + AFTER_PASS_MS },
     };
     s = addTurn(s, "note", `The gate gave ${minutes} min on ${e.domain}.`, t);
+    s = { ...s, log: logEvent(s, "pass", { site: e.domain, kind, minutes, exam: examOn(s) || undefined }) };
     return { state: s, result: { decision: "allow", minutes, site: e.domain, reply: answer.reply } };
   }
   if (answer.decision === "ask" && !((s.followUps || {})[kind] > t)) {
@@ -769,6 +781,7 @@ export function applyGateAnswer(state, { url, answer, now }) {
   }
   const until = t + COOLDOWN_MS;
   s = { ...s, followUps, cooldowns: { ...(s.cooldowns || {}), [kind]: until } };
+  s = { ...s, log: logEvent(s, "gate.no", { site: e.domain, kind }) };
   return { state: s, result: { decision: "deny", until, reply: answer.reply } };
 }
 
@@ -904,15 +917,15 @@ export function examOn(state) {
 }
 
 /** Start exam mode, or move its end later (the later end wins). Applied through proposeRules: a tightening. */
-export function startExam(state, { until, goal }, now) {
+export function startExam(state, { until, goal, source = "extension" }, now) {
   const s = rollover(state, now);
   const t = s.clock.floor;
   const end = Math.min(Number(until), t + MAX_EXAM_DAYS * 86400e3);
   if (!Number.isFinite(end) || end <= t) return { state: s, refused: "bad_until" };
   const cur = examOn(s) ? s.rules.exam : null;
   const exam = { until: Math.max(end, cur ? cur.until : 0), goal: String(goal || (cur && cur.goal) || "").replace(/\s+/g, " ").trim().slice(0, 200) };
-  const r = proposeRules(s, { ...wantedRules(s), exam }, now);
-  return { state: r.state, exam };
+  const r = proposeRules(s, { ...wantedRules(s), exam }, now, { source });
+  return { state: { ...r.state, log: logEvent(r.state, "exam.start", { until: exam.until, goal: exam.goal, source }) }, exam };
 }
 
 /** End exam mode now, but only with the sentence, word for word. */
@@ -928,7 +941,7 @@ export function endExam(state, now) {
   if (!consented(s, "talk")) return { state: s, refused: "help_off", until: s.rules.exam.until };
   const key = "exam:" + s.rules.exam.until;
   if (((s.denied || {})[key] || 0) > s.clock.floor) return { state: s, refused: "asked_today" };
-  return { state: { ...s, loosen: { kind: "exam", changes: ["End exam mode early"], key, asked: "" } }, needsOk: true };
+  return { state: withLoosen(s, { kind: "exam", changes: ["End exam mode early"], key, asked: "" }), needsOk: true };
 }
 
 /** Exam mode ends at `at` (now, or the next morning), in the rules in force and in what waits. */
@@ -943,11 +956,28 @@ function examEnd(s, at) {
 // A yes still applies the next morning. A no keeps the rule, and the same request waits until tomorrow.
 // If the agent cannot be reached, the loosening works as without it: it waits for the morning.
 
-export const MAX_LOOSEN_LOG = 100;
+export const MAX_LOG = 300;
 
-function logLoosen(s, entry) {
-  const at = s.clock.floor;
-  return [...(s.loosenLog || []), { at, day: s.usage.day, ...entry }].slice(-MAX_LOOSEN_LOG);
+/**
+ * One history log, kept on this device: rule changes, loosening asks and answers, passes and refusals at the
+ * gate, and exam starts and ends, each with where it came from. Returns the new log.
+ */
+export function logEvent(s, type, entry = {}) {
+  const at = (s.clock && s.clock.floor) || 0;
+  return [...(s.log || []), { at, day: s.usage && s.usage.day, type, ...entry }].slice(-MAX_LOG);
+}
+const logLoosen = (s, entry) => logEvent(s, "loosen", entry);
+
+// A second loosening waits behind the first instead of replacing it; one per kind ("rules", "exam").
+function withLoosen(s, item) {
+  const queue = (s.loosenQueue || []).filter((q) => q.kind !== item.kind);
+  if (!s.loosen || s.loosen.kind === item.kind) return { ...s, loosen: item, loosenQueue: queue };
+  return { ...s, loosenQueue: [...queue, item] };
+}
+function withoutLoosen(s, kind) {
+  const queue = (s.loosenQueue || []).filter((q) => q.kind !== kind);
+  if (s.loosen && s.loosen.kind === kind) return { ...s, loosen: queue[0] || null, loosenQueue: queue.slice(1) };
+  return { ...s, loosenQueue: queue };
 }
 
 /** What the agent is sent for one reason, or why nothing is sent. */
@@ -971,17 +1001,19 @@ export function applyLoosenAnswer(state, { answer, message = "", now }) {
   if (message) s = addTurn(s, "user", message, now);
   s = addTurn(s, "gatekeeper", answer.reply, now);
   if (answer.decision === "ask" && !l.asked) {
-    return { state: { ...s, loosen: { ...l, asked: answer.reply.slice(0, 300) }, loosenLog: log("ask") }, result: { decision: "ask", reply: answer.reply } };
+    return { state: { ...s, loosen: { ...l, asked: answer.reply.slice(0, 300) }, log: log("ask") }, result: { decision: "ask", reply: answer.reply } };
   }
   if (answer.decision === "allow") {
     const morning = s.usage.endsAt;
     // For exam mode: at once if the agent says the exam is over (examDone), else the next morning.
     const at = l.kind === "exam" && answer.examDone === true ? s.clock.floor : morning;
     s = l.kind === "exam" ? examEnd(s, at) : { ...s, pending: s.pending ? { ...s.pending, ok: true, from: Math.max(s.pending.from, morning) } : null };
-    return { state: { ...s, loosen: null, loosenLog: log("allow") }, result: { decision: "allow", reply: answer.reply, from: at, now: at === s.clock.floor } };
+    s = { ...withoutLoosen(s, l.kind), log: log("allow") };
+    if (l.kind === "exam") s = { ...s, log: logEvent(s, "exam.end", { how: at === s.clock.floor ? "agent, at once" : "agent, next morning", at: at }) };
+    return { state: s, result: { decision: "allow", reply: answer.reply, from: at, now: at === s.clock.floor } };
   }
   // No (or a second question): the rule stays, and the same request waits until tomorrow.
-  s = { ...s, pending: l.kind === "rules" ? null : s.pending, denied: { ...(s.denied || {}), [l.key]: s.usage.endsAt }, loosen: null, loosenLog: log("deny") };
+  s = { ...withoutLoosen({ ...s, pending: l.kind === "rules" ? null : s.pending, denied: { ...(s.denied || {}), [l.key]: s.usage.endsAt } }, l.kind), log: log("deny") };
   return { state: s, result: { decision: "deny", reply: answer.reply, until: s.usage.endsAt } };
 }
 
@@ -994,7 +1026,7 @@ export function loosenUnavailable(state, { message = "", error = "", now }) {
   s = l.kind === "exam" ? s : { ...s, pending: s.pending ? { ...s.pending, ok: true } : null };
   if (message) s = addTurn(s, "user", message, now);
   s = addTurn(s, "note", l.kind === "exam" ? "Gatekeeper couldn't be reached, so exam mode runs to its end." : "Gatekeeper couldn't be reached, so the change waits for the morning as usual.", now);
-  return { state: { ...s, loosen: null, loosenLog: logLoosen(s, { kind: l.kind, changes: l.changes, message: String(message).slice(0, MAX_MESSAGE), decision: "unavailable", reply: String(error).slice(0, 80) }) } };
+  return { state: { ...withoutLoosen(s, l.kind), log: logLoosen(s, { kind: l.kind, changes: l.changes, message: String(message).slice(0, MAX_MESSAGE), decision: "unavailable", reply: String(error).slice(0, 80) }) } };
 }
 
 // ---------- the Mac app (native messaging, contract version 1 in ~/gatekeeper-mac/docs/contract.md) ----------
@@ -1026,7 +1058,7 @@ export function snapshotKey(snap) {
  */
 export function applyMacRequest(state, req, now) {
   if (!req || typeof req !== "object") return { state, refused: "bad_request" };
-  if (req.type === "exam.start") return startExam(state, { until: req.until, goal: req.goal }, now);
+  if (req.type === "exam.start") return startExam(state, { until: req.until, goal: req.goal, source: "mac" }, now);
   return { state, refused: "unknown_type" };
 }
 
@@ -1069,7 +1101,7 @@ export function applyCard(state, now) {
   if (!card) return { state: s, refused: "no_card" };
   const p = chatPreview(s, card.answer, now);
   if (p.error) return { state: s, refused: p.error };
-  const r = proposeRules(s, p.rules, now);
+  const r = proposeRules(s, p.rules, now, { source: "talk" });
   s = r.state;
   let text;
   let exam = null;

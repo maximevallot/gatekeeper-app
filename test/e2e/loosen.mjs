@@ -86,7 +86,7 @@ try {
   await reason("Lectures");
   s = await st();
   check("with the agent out of reach, nobody is locked in: it waits for the morning", s.pending && s.pending.ok === true && s.pending.rules.kinds.video.minutes === 20, s.pending);
-  check("every request and answer is in the log", JSON.stringify(s.loosenLog.map((e) => e.decision)) === JSON.stringify(["deny", "ask", "allow", "unavailable"]), s.loosenLog);
+  check("every request and answer is in the log", JSON.stringify(s.log.filter((e) => e.type === "loosen").map((e) => e.decision)) === JSON.stringify(["deny", "ask", "allow", "unavailable"]), s.log);
   check("the agent saw the change and the reason", mock.requests.some((r) => r.body.system?.includes("You hold the key") && /Video: 15 min a day → 25 min a day/.test(r.body.messages[0].content) && /I just want more/.test(r.body.messages[0].content)));
 } catch (e) {
   console.log("FAIL", e.message); failures++;
