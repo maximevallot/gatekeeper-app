@@ -125,7 +125,7 @@ try {
   // One thread (one-model plan, gap 3): a second Talk view, like the popup's, shows the same talk.
   const second = await p.send("Target.createTarget", { url: (await sw.evaluate(`chrome.runtime.getURL("pages/talk.html")`)) });
   await sleep(1500);
-  const other = await connect((t) => t.id === second.result.targetId);
+  const other = await connect((t) => t.id === second.result.targetId, CDP_PORT);
   const otherText = await other.evaluate(`document.getElementById('chat-log').innerText`);
   check("a second view of Talk shows the same thread", /video games but keep educational/.test(otherText) && /Done/.test(otherText), otherText);
   other.close();
