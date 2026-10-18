@@ -234,9 +234,9 @@ $("help-sent").append(sent.list);
 
 $("help").addEventListener("change", () => {
   const on = $("help").checked;
-  // Sorting new sites needs to see every site; the browser asks, and the request has to start in the click.
-  const permission = on ? chrome.permissions.request({ origins: ["*://*/*"] }).catch(() => false) : chrome.permissions.remove({ origins: ["*://*/*"] }).catch(() => false);
-  permission.then(async () => {
+  // Access to every site is asked only where it is first needed, when exam mode starts (tester run, #4); turning
+  // AI help on doesn't ask for it.
+  Promise.resolve().then(async () => {
     try { await ask("consent", { help: on }); saved(on ? "Claude help is on" : "Claude help is off: nothing is sent"); }
     catch { saved("Not saved: Gatekeeper's background didn't answer"); }
     await load();

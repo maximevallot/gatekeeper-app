@@ -1,7 +1,7 @@
 // Today, in the toolbar popup: a ring per watched kind (minutes left, or a lock when closed), the goal, and
 // the way to change something.
 import { todaySummary } from "../engine/engine.js";
-import { ask, el, svg, lockIcon, chatIcon, clock, checkWorker, examForm, extensionsPage, askEverySite, siteAccessHelp, openAccessButton } from "./common.js";
+import { ask, el, svg, lockIcon, chatIcon, clock, checkWorker, examForm, extensionsPage, askEverySite, siteAccessHelp, openAccessButton, EVERY_SITE_LINE } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 const C = 2 * Math.PI * 40;
@@ -50,7 +50,7 @@ async function show() {
   $("offer").classList.toggle("hidden", !t.offer);
   if (t.offer) {
     const when = new Date(t.offer.start).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
-    $("offer-text").textContent = `${t.offer.title}, ${when}. Start exam mode until then?`;
+    $("offer-text").textContent = `${t.offer.title}, ${when}. Start exam mode until then? ` + (seeAll ? "" : EVERY_SITE_LINE);
     // The offered event is the exam: its start is fixed as exam mode's own time (QA round 3, N1).
     $("offer-start").onclick = async () => { await askEverySite(); await ask("startExam", { until: t.offer.start, at: t.offer.start, goal: t.offer.title, source: "calendar" }); show(); };
     $("offer-no").onclick = async () => { await ask("dismissOffer", { offer: t.offer }); show(); };

@@ -77,8 +77,8 @@ $("help-line").after(sent.list);
 $("start").addEventListener("click", async () => {
   $("start").disabled = true;
   const help = $("help").checked;
-  // Sorting new sites needs to see every site: the browser asks now, inside the click.
-  const permission = help ? chrome.permissions.request({ origins: ["*://*/*"] }).catch(() => false) : Promise.resolve(false);
+  // Access to every site is asked only when exam mode starts (tester run, #4), not here.
+  const permission = Promise.resolve(false);
   const kinds = Object.fromEntries([...picked].map((k) => [k, minutes]));
   await ask("setup", { kinds, goal: $("goal").value });
   await permission;

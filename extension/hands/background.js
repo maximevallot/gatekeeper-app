@@ -495,7 +495,11 @@ chrome.permissions.onRemoved.addListener(async () => {
   if (!(await chrome.permissions.contains(ALL_SITES))) update((s) => ({ state: engine.setSorting(s, false) }));
   else update((s) => ({ state: s }));
 });
-chrome.permissions.onAdded.addListener(() => update((s) => ({ state: s })));
+// Access to every site granted (when exam mode starts): with AI help on, sorting new sites comes with it.
+chrome.permissions.onAdded.addListener(async () => {
+  const all = await chrome.permissions.contains(ALL_SITES);
+  update((s) => ({ state: all && engine.consented(s, "help") && !s.sorting ? engine.setSorting(s, true) : s }));
+});
 
 chrome.tabs.onActivated.addListener(tick);
 chrome.windows.onFocusChanged.addListener(tick);

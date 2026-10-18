@@ -117,6 +117,8 @@ try {
   // Start exam mode from Today (one-model plan, gap 2): it applies at once, and the rules page shows it.
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(800);
   await p.evaluate(`document.getElementById('exam-start').click()`); await sleep(300);
+  check("tester #4: before the browser's all-sites prompt, one plain line says why, and that only site names are read",
+    /only site names, never page content/.test(await p.evaluate(`(document.getElementById('exam-access-line') || {}).textContent || ''`)));
   const until = Date.now() + 2 * 86400e3;
   await p.evaluate(`(() => { const d = new Date(${until}), z = (n) => String(n).padStart(2, '0');
     document.getElementById('exam-until').value = d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + 'T' + z(d.getHours()) + ':' + z(d.getMinutes());
