@@ -740,8 +740,8 @@ export function gateRequest(state, { url, message, now }) {
     payload: {
       installId: s.installId, goal: s.goal || "", site: siteDomain(url), kind: d.kind,
       minutesUsed: Math.min(d.usedMinutes || 0, 1440), budget: d.budgetMinutes ?? 0, deadlines: deadlines(s, t),
-      // In exam mode the gate gives a pass only for a page that serves the exam (shared name, one-model step 1).
-      exam: d.exam ? { until: d.exam.until, goal: d.exam.goal || "" } : null,
+      // In exam mode the gate gives a pass only for a page that serves the exam (shared names, one-model step 1).
+      exam: examForRelay(s), now: localIso(t),
       message: text.slice(0, MAX_MESSAGE),
     },
   };
@@ -864,10 +864,15 @@ export function chatRequest(state, { message, history = [], now }) {
       installId: s.installId, message: text.slice(0, MAX_MESSAGE), history: turns,
       rules: rulesForChat(wantedRules(s)), today: dayKey(s.clock.floor, s.rules.dayStart),
       // Exam mode and the time of day, so "until Wednesday 8:30" and "end exam mode" can be understood.
-      exam: examOn(s) ? { until: s.rules.exam.until, goal: s.rules.exam.goal || "" } : null,
+      exam: examForRelay(s),
       now: localIso(s.clock.floor),
     },
   };
+}
+
+/** Exam mode as the relay is sent it (shared names): until as local time with its offset, or null. */
+function examForRelay(s) {
+  return examOn(s) ? { until: localIso(s.rules.exam.until), goal: (s.rules.exam.goal || "").slice(0, 300) } : null;
 }
 
 /** "2026-10-17T14:05:00-04:00": local time with its offset. */
@@ -990,7 +995,8 @@ export function loosenRequest(state, { message, now }) {
   if (!l) return { refused: "nothing_waiting" };
   if (!consented(s, "talk")) return { refused: "no_consent" };
   if (!text) return { refused: "empty" };
-  return { payload: { installId: s.installId, kind: l.kind, goal: s.goal || "", changes: l.changes, asked: l.asked || "", message: text.slice(0, MAX_MESSAGE) } };
+  return { payload: { installId: s.installId, kind: l.kind, goal: s.goal || "", changes: l.changes, asked: l.asked || "", message: text.slice(0, MAX_MESSAGE),
+    exam: examForRelay(s), now: localIso(s.clock.floor) } };
 }
 
 /** Apply the agent's answer. Anything malformed changes nothing: the loosening keeps waiting for a yes. */
@@ -1007,8 +1013,9 @@ export function applyLoosenAnswer(state, { answer, message = "", now }) {
   }
   if (answer.decision === "allow") {
     const morning = s.usage.endsAt;
-    // For exam mode: at once if the agent says the exam is over (examDone), else the next morning.
-    const at = l.kind === "exam" && answer.examDone === true ? s.clock.floor : morning;
+    // For exam mode: at once if the agent says the exam is over (when: "now"), else the next morning. A relay
+    // without the field (when missing) means the morning.
+    const at = l.kind === "exam" && (answer.when === "now" || answer.examDone === true) ? s.clock.floor : morning;
     s = l.kind === "exam" ? examEnd(s, at) : { ...s, pending: s.pending ? { ...s.pending, ok: true, from: Math.max(s.pending.from, morning) } : null };
     s = { ...withoutLoosen(s, l.kind), log: log("allow") };
     if (l.kind === "exam") s = { ...s, log: logEvent(s, "exam.end", { how: at === s.clock.floor ? "agent, at once" : "agent, next morning", at: at }) };

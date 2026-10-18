@@ -111,7 +111,8 @@ test("a snapshot is sent again only when what the Mac shows changes, not every s
 test("decision 2: in exam mode the gate talks, a pass is at most 5 minutes, and it opens only that site", () => {
   let s = setHelp(startExam(setUp({ video: 20 }), { until: WED, goal: "15.425 midterm" }, MON).state, true);
   const req = gateRequest(s, { url: "https://www.youtube.com/watch?v=wacc", message: "The WACC lecture for the exam", now: MON });
-  assert.deepEqual(req.payload.exam, { until: WED, goal: "15.425 midterm" });
+  assert.deepEqual(req.payload.exam, { until: "2026-10-21T08:30:00-04:00", goal: "15.425 midterm" });
+  assert.equal(req.payload.now, "2026-10-19T20:00:00-04:00");
   const g = applyGate(s, "https://www.youtube.com/watch?v=wacc", 10);
   assert.equal(g.result.minutes, 5);
   assert.equal(decide(g.state, { url: "https://www.youtube.com/watch?v=wacc", now: MON + 60e3 }).verdict, "allow");

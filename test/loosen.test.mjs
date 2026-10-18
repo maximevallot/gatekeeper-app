@@ -26,7 +26,7 @@ test("with Claude help on, a loosening waits for the agent's yes, and then for t
   assert.equal(rollover(r.state, TUE).rules.kinds.video.minutes, 20, "no yes: the morning does not apply it");
   const req = loosenRequest(r.state, { message: "Two lecture recordings a day now", now: MON });
   assert.deepEqual(req.payload, { installId: "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f", kind: "rules", goal: "Finish the 15.390 slides",
-    changes: ["Video: 20 min a day → 45 min a day"], asked: "", message: "Two lecture recordings a day now" });
+    changes: ["Video: 20 min a day → 45 min a day"], asked: "", message: "Two lecture recordings a day now", exam: null, now: "2026-10-19T22:00:00-04:00" });
   const a = applyLoosenAnswer(r.state, { answer: yes, message: "Two lecture recordings a day now", now: MON });
   assert.equal(a.result.decision, "allow");
   assert.equal(a.state.rules.kinds.video.minutes, 20, "a yes still waits for the morning");
@@ -91,9 +91,10 @@ test("ending exam mode early: the agent decides; a yes ends it at once if the ex
   const y = applyLoosenAnswer(e.state, { answer: yes, now: MON }).state;
   assert.ok(examOn(y), "still on tonight");
   assert.ok(!examOn(rollover(y, TUE)), "over in the morning");
-  const done = applyLoosenAnswer(e.state, { answer: { ...yes, examDone: true }, now: MON });
+  const done = applyLoosenAnswer(e.state, { answer: { ...yes, when: "now" }, now: MON });
   assert.ok(!examOn(done.state), "the exam is over: it ends at once");
   assert.equal(done.result.now, true);
+  assert.ok(examOn(applyLoosenAnswer(e.state, { answer: { ...yes, when: "morning" }, now: MON }).state), "when: morning waits for the morning");
   const n = applyLoosenAnswer(e.state, { answer: no, now: MON }).state;
   assert.ok(examOn(rollover(n, TUE)));
   assert.equal(endExam(n, MON).refused, "asked_today");

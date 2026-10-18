@@ -15,8 +15,13 @@ test("the chat is sent exam mode and the local time with its offset", () => {
   assert.equal(off.exam, null);
   assert.equal(off.now, "2026-10-19T20:00:00-04:00");
   const on = chatRequest(startExam(setUp(), { until: WED, goal: "15.425 midterm" }, MON).state, { message: "hi", now: MON }).payload;
-  assert.deepEqual(on.exam, { until: WED, goal: "15.425 midterm" });
+  assert.deepEqual(on.exam, { until: "2026-10-22T08:30:00-04:00", goal: "15.425 midterm" }, "until as local time with its offset (shared names)");
   assert.equal(localIso(MON), "2026-10-19T20:00:00-04:00");
+});
+
+test("examStart's until may come as local time with its offset, as the relay sends it", () => {
+  const p = chatPreview(setUp(), { reply: "ok", diff: [{ op: "examStart", until: "2026-10-22T08:30:00-04:00", goal: "midterm" }] }, MON);
+  assert.equal(p.rules.exam.until, WED);
 });
 
 test("examStart from the chat starts exam mode, applying now", () => {

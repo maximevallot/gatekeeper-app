@@ -29,7 +29,7 @@ test("one log: rule changes, exam starts and ends with where they came from, pas
   let s = proposeRules(setUp(), { ...setUp().rules, kinds: { video: { minutes: 10 }, social: { minutes: 15 } } }, MON, { source: "rules" }).state;
   s = applyMacRequest(s, { type: "exam.start", until: WED, goal: "midterm" }, MON).state;
   s = endExam(s, MON).state;
-  s = applyLoosenAnswer(s, { answer: { ...yes, examDone: true }, message: "It's over", now: MON }).state;
+  s = applyLoosenAnswer(s, { answer: { ...yes, when: "now" }, message: "It's over", now: MON }).state;
   s = { ...s, usage: { ...s.usage, seconds: { video: 600 } } };
   s = applyGateAnswer(s, { url: "https://www.youtube.com/watch?v=a", answer: { decision: "allow", minutes: 5, reply: "ok" }, now: MON }).state;
   s = applyGateAnswer(s, { url: "https://www.instagram.com/", answer: { decision: "deny", minutes: 0, reply: "No." }, now: MON }).state;

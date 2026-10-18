@@ -28,7 +28,7 @@ test("the gate sends only what /gate needs", () => {
   const r = gateRequest(s, { url: YT, message: "  I need the lecture 6 recording  ", now: NOW });
   assert.deepEqual(r.payload, {
     installId: "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f", goal: "Finish problem set 4", site: "youtube.com",
-    kind: "video", minutesUsed: 20, budget: 20, deadlines: [], message: "I need the lecture 6 recording", exam: null,
+    kind: "video", minutesUsed: 20, budget: 20, deadlines: [], message: "I need the lecture 6 recording", exam: null, now: "2026-10-19T21:40:00-04:00",
   });
   assert.deepEqual(gateRequest(s, { url: YT, message: "   ", now: NOW }), { refused: "empty" });
   assert.equal(gateRequest(s, { url: YT, message: "x".repeat(900), now: NOW }).payload.message.length, 500);

@@ -212,7 +212,8 @@ export function applyDiff(rules, diff) {
       }
       case "examStart": {
         // Start exam mode, or move its end later; whether that is now or too far ahead is the engine's call.
-        const until = Number(op.until);
+        // The relay sends local time with its offset ("2026-10-22T08:30:00-04:00"); a number is taken as ms.
+        const until = typeof op.until === "number" ? op.until : Date.parse(String(op.until || ""));
         if (!Number.isFinite(until)) { skipped.push(op); break; }
         r.exam = { until, goal: text(op.goal, 200) || (r.exam && r.exam.goal) || "" };
         break;
