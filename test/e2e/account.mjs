@@ -32,6 +32,10 @@ function relayCopy() {
   execFileSync("rsync", ["-a", "--exclude", "node_modules", "--exclude", ".wrangler", "--exclude", ".git", src + "/", dir + "/"]);
   const mods = existsSync(join(src, "node_modules")) ? join(src, "node_modules") : join(homedir(), "gatekeeper-relay", "node_modules");
   symlinkSync(mods, join(dir, "node_modules"));
+  // The account always runs the newest engine (design, "Mixed versions"): this branch's, as committed, vendored
+  // with the relay's own script into the copy.
+  const app = fileURLToPath(new URL("../..", import.meta.url));
+  execFileSync("sh", [join(dir, "scripts", "vendor-engine.sh"), "HEAD"], { env: { ...process.env, APP: app }, stdio: "ignore" });
   return dir;
 }
 
