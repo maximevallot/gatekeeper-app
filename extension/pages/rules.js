@@ -370,6 +370,7 @@ async function renderMac() {
   // If the background doesn't answer (an old worker beside these pages), say what the browser has granted,
   // and that a reload connects it, rather than showing the switch off.
   const m = await ask("mac").catch(async () => ({ permitted: await chrome.permissions.contains(NATIVE).catch(() => false), error: "reload_needed" }));
+  m.error = m.macError || m.error;
   $("mac").checked = !!m.permitted;
   $("mac-sub").textContent = !m.permitted
     ? "Off. With Gatekeeper for Mac on, your goal, each kind's minutes today and exam mode go to a file on this Mac that apps you run can read. Nothing goes to a server."
@@ -377,7 +378,13 @@ async function renderMac() {
       ? "Connected. Your goal, each kind's minutes today and exam mode go to Gatekeeper for Mac, in a file on this Mac that apps you run can read. Nothing goes to a server."
       : m.error === "reload_needed"
         ? "Reload Gatekeeper once (in your browser's extensions page) to connect."
-        : "Gatekeeper for Mac isn't answering. Is it installed and open?";
+        : m.error === "other_browser_linked"
+          ? `Gatekeeper for Mac follows ${m.linkedName}. To follow this browser instead, change it in Gatekeeper for Mac's Settings.`
+          : m.error === "mac_outdated"
+            ? "Update Gatekeeper for Mac: this version can't read what the extension sends."
+            : m.error === "bad_message"
+              ? `Gatekeeper for Mac couldn't read today's update${m.reason ? ` (${m.reason})` : ""}. Updating both may fix it.`
+              : "Gatekeeper for Mac isn't answering. Is it installed and open?";
 }
 $("mac").addEventListener("change", () => {
   // The browser asks the user; the request has to start inside the click.

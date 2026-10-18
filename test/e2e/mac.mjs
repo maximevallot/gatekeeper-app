@@ -22,13 +22,16 @@ process.on("exit", () => { try { browser.kill(); } catch {} try { rmSync(work, {
 // bridge would. (Brave on macOS reads native-messaging hosts only from the real per-user folder, where
 // Gatekeeper for Mac registers the real bridge; the test does not touch it.)
 const seen = [], queue = [];
+let mode = "normal"; // Gatekeeper for Mac 0.2.0's other answers: "other" (it follows Safari), "outdated" (it reads v2 only)
 const server = createServer((req, res) => {
   let raw = "";
   req.on("data", (c) => (raw += c));
   req.on("end", () => {
     const msg = JSON.parse(raw || "{}");
     seen.push(msg);
-    const out = msg.v === 1 ? { ok: true, v: 1, requests: queue.splice(0) } : { ok: false, error: "unknown_version" };
+    const mac = { version: "0.2.0", reads: mode === "outdated" ? [2] : [1] };
+    const out = mode === "other" ? { ok: false, error: "other_browser_linked", linked: "com.apple.Safari", linkedName: "Safari", mac }
+      : msg.v === 1 ? { ok: true, v: 1, requests: queue.splice(0), mac } : { ok: false, error: "unknown_version", mac };
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(out));
   });
@@ -99,6 +102,14 @@ try {
   check("with Claude help off, exam mode runs to its end, and the page says so",
     /runs to its end/.test(await p.evaluate(`document.getElementById('exam-note').textContent`)) && !!((await st()).rules.exam), await p.evaluate(`document.getElementById('exam-note').textContent`));
   check("and the snapshot still shows it", snapshots().slice(-1)[0].exam && snapshots().slice(-1)[0].exam.until === until);
+
+  // Gatekeeper for Mac 0.2.0's replies: it follows another browser, or it can't read this version.
+  mode = "other";
+  await p.send("Page.navigate", { url: rulesUrl }); await sleep(2000);
+  check("a Mac app that follows Safari says so", /follows Safari/.test(await p.evaluate(`document.getElementById('mac-sub').textContent`)), await p.evaluate(`document.getElementById('mac-sub').textContent`));
+  mode = "outdated";
+  await p.send("Page.navigate", { url: rulesUrl }); await sleep(2000);
+  check("a Mac app that can't read v1 asks to be updated", /Update Gatekeeper for Mac/.test(await p.evaluate(`document.getElementById('mac-sub').textContent`)), await p.evaluate(`document.getElementById('mac-sub').textContent`));
 } catch (e) {
   console.log("FAIL", e.message); failures++;
 }

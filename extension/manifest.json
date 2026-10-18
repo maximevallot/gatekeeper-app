@@ -97,8 +97,7 @@
     "https://gatekeeper-relay.mvallot22.workers.dev/*"
   ],
   "optional_permissions": [
-    "nativeMessaging",
-    "tabs"
+    "nativeMessaging"
   ],
   "optional_host_permissions": [
     "*://*/*"

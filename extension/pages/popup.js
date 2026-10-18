@@ -1,7 +1,7 @@
 // Today, in the toolbar popup: a ring per watched kind (minutes left, or a lock when closed), the goal, and
 // the way to change something.
 import { todaySummary } from "../engine/engine.js";
-import { ask, el, svg, lockIcon, chatIcon, clock, checkWorker, examForm } from "./common.js";
+import { ask, el, svg, lockIcon, chatIcon, clock, checkWorker, examForm, extensionsPage } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 const C = 2 * Math.PI * 40;
@@ -55,9 +55,16 @@ async function show() {
     $("offer-no").onclick = async () => { await ask("dismissOffer", { offer: t.offer }); show(); };
   }
   if (t.exam) { $("mode").textContent = `Exam mode until ${clock(t.exam.until)}`; $("mode").className = "pill closed"; }
-  else if (blind && blind.length) { $("mode").textContent = "Check site access"; $("mode").className = "pill warn"; }
+  else if (blind && blind.length) { $("mode").textContent = "Can't see some sites"; $("mode").className = "pill warn"; }
   else if (t.waiting) { $("mode").textContent = "Change tomorrow"; $("mode").className = "pill warn"; }
   $("change").replaceChildren(chatIcon(), "Change something");
+  // Withheld site access, said plainly with the one step that restores it (QA round 2 #3, "Make it visible").
+  const old = document.getElementById("blind-today");
+  if (old) old.remove();
+  if (blind && blind.length) {
+    $("rings").before(el("div", { class: "note", id: "blind-today" },
+      el("span", {}, `Gatekeeper can't see ${blind.slice(0, 2).join(", ")}${blind.length > 2 ? ` and ${blind.length - 2} more` : ""}, so time there isn't counted and a closed site may open. To fix it: ${extensionsPage()} → Gatekeeper → Site access → On all sites.`)));
+  }
 }
 
 // The watch week: minutes so far per kind, nothing blocked, and one tap to set limits now.

@@ -1,11 +1,11 @@
 // npm run e2e:access — QA round 2's findings that need a real browser, in a throwaway headless Brave:
 //   #18 a youtube-nocookie.com player is blocked while Video is closed;
-//   #3  site access withheld the way people do it (brave://extensions → Site access → On click), with tab
-//       addresses readable ("tabs"): a closed site still goes to the gate;
+//   #3  site access withheld the way people do it (brave://extensions → Site access → On click): Maxime chose
+//       "Make it visible", so Today says so with the step that restores it, and the week keeps the period;
 //   #10 in exam mode, a site Gatekeeper doesn't know goes to the gate;
 //   #2  the worker's clock moved three days ahead does not end exam mode: the relay's time (a local stand-in
 //       here) says otherwise.
-// The test copy holds "tabs" and every site up front, as a user who said yes to both would.
+// The test copy holds every site up front, as a user who turned on Claude help would.
 import { spawn } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -44,7 +44,6 @@ try {
   const bg = join(ext, "hands", "background.js");
   writeFileSync(bg, readFileSync(bg, "utf8").replace('(await chrome.idle.queryState(IDLE_SECONDS)) === "active"', "true"));
   const m = JSON.parse(readFileSync(join(ext, "manifest.json"), "utf8"));
-  m.permissions.push("tabs");
   m.host_permissions.push("*://*/*");
   writeFileSync(join(ext, "manifest.json"), JSON.stringify(m));
   const browser = spawn(BROWSER, ["--headless=new", `--user-data-dir=${join(work, "profile")}`, "--no-first-run", "--no-default-browser-check",
@@ -84,10 +83,11 @@ try {
   await p.send("Target.closeTarget", { targetId: ex.result.targetId });
   await p.send("Target.activateTarget", { targetId: p.t.id });
   await sleep(2500);
-  await p.send("Page.navigate", { url: "https://www.youtube.com/" });
+  await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(1200);
+  const today = await p.evaluate(`(document.getElementById('blind-today') || {}).textContent || ''`);
+  check("#3: Today says plainly that Gatekeeper can't see youtube.com, with the step to fix it", /can't see/.test(today) && /youtube\.com/.test(today) && /On all sites/.test(today), today);
+  check("#3: the toolbar badge flags it", (await sw.evaluate(`chrome.action.getBadgeText({})`)) === "!");
   let href = "";
-  for (let i = 0; i < 12 && !href.includes("/pages/gate.html"); i++) { await sleep(500); href = await p.evaluate("location.href").catch(() => ""); }
-  check("#3: with access withheld, YouTube (closed) still goes to the gate", href.includes("/pages/gate.html#https://www.youtube.com/"), href);
   const again = await connect((t) => t.type === "page" && t.url.startsWith("brave://extensions"), CDP_PORT).catch(() => null);
   if (again) again.close();
   const ex2 = await p.send("Target.createTarget", { url: "brave://extensions/?id=" + id }); await sleep(1500);
@@ -96,7 +96,11 @@ try {
   xp2.close();
   await p.send("Target.closeTarget", { targetId: ex2.result.targetId });
   await p.send("Target.activateTarget", { targetId: p.t.id });
-  await sleep(2000);
+  await sleep(3500);
+  const log = (await st()).log.filter((e) => e.type === "access.withheld");
+  check("#3: the period of withheld access is in the history", log.length === 1 && log[0].domains.includes("youtube.com"), log);
+  await p.send("Page.navigate", { url: base + "/pages/week.html" }); await sleep(1200);
+  check("#3: the week shows it", /Access withheld for .* on /.test(await p.evaluate(`(document.getElementById('withheld-week') || {}).textContent || ''`)));
 
   // #10: exam mode, then a site Gatekeeper doesn't know.
   await p.send("Page.navigate", { url: base + "/pages/rules.html" }); await sleep(1000);

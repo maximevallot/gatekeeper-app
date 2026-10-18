@@ -54,10 +54,7 @@ function update(step) {
 
 /** The watched domains whose access the user withheld (site access "On click", or one site removed). */
 async function withheldDomains() {
-  const { origins = [], permissions = [] } = await chrome.permissions.getAll();
-  // With "tabs", every tab's address can be read whatever site access says: the tick sends a closed page to the
-  // gate and counts an open one, so nothing is blind (QA round 2, C2).
-  if (permissions.includes("tabs")) return [];
+  const { origins = [] } = await chrome.permissions.getAll();
   const all = origins.some((o) => o === "<all_urls>" || o === "*://*/*");
   const granted = new Set(origins.map((o) => (o.match(/^\*:\/\/\*\.([^/]+)\/\*$/) || [])[1]).filter(Boolean));
   const covered = (d) => { for (let x = d; x.includes("."); x = x.slice(x.indexOf(".") + 1)) if (granted.has(x)) return true; return false; };
@@ -128,7 +125,17 @@ async function macExchange(force) {
     macSent = null;
     return;
   }
-  macStatus = { connected: !!(reply && reply.ok), error: reply && reply.ok ? null : (reply && reply.error) || "bad_reply" };
+  // Gatekeeper for Mac 0.2.0 (contract v1): it follows one browser, says which snapshot versions it reads, and
+  // names what it couldn't read.
+  const mac = (reply && reply.mac) || null;
+  const outdated = !!(mac && Array.isArray(mac.reads) && !mac.reads.includes(snap.v));
+  macStatus = {
+    connected: !!(reply && reply.ok) && !outdated,
+    error: outdated ? "mac_outdated" : reply && reply.ok ? null : (reply && reply.error) || "bad_reply",
+    linkedName: reply && reply.error === "other_browser_linked" ? String(reply.linkedName || reply.linked || "another browser").slice(0, 60) : null,
+    reason: reply && reply.reason ? String(reply.reason).slice(0, 120) : null,
+    version: mac && typeof mac.version === "string" ? mac.version.slice(0, 20) : null,
+  };
   const requests = reply && reply.ok && Array.isArray(reply.requests) ? reply.requests.slice(0, 10) : [];
   if (requests.length) {
     await update((s) => {
@@ -197,6 +204,10 @@ async function tick() {
   const active = present || !!(tab && tab.audible);
   const out = await update((s) => engine.tick(s, { url: front || "", title: (tab && tab.title) || "", focused, active, seconds, now, audible }));
   checkTime();
+  // Each period of withheld site access goes into the history (QA round 2 #3, "Make it visible").
+  if (JSON.stringify((state.withheld && state.withheld.domains) || []) !== JSON.stringify([...blind].sort())) {
+    await update((st) => ({ state: engine.noteWithheld(st, blind, Date.now()) }));
+  }
   if (!front) {
     badge(blind.length ? "!" : "");
     return;
@@ -408,7 +419,9 @@ const handlers = {
   },
   async mac() {
     await macSync(true);
-    return { ...macStatus, permitted: await chrome.permissions.contains(NATIVE) };
+    // As macError: a reply with "error" would read to the page's ask() as the worker failing.
+    const { error, ...rest } = macStatus;
+    return { ...rest, macError: error, permitted: await chrome.permissions.contains(NATIVE) };
   },
   async watch({ goal }) {
     await update((s) => ({ state: engine.startWatch(s, { goal }, Date.now()) }));

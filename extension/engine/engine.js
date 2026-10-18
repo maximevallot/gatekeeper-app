@@ -356,7 +356,36 @@ export function weekSummary(state, now) {
     loosenAsked: (s.log || []).filter((e) => e.type === "loosen" && e.at > t - 7 * 86400e3 && e.decision !== "ask").length,
     loosenAllowed: (s.log || []).filter((e) => e.type === "loosen" && e.at > t - 7 * 86400e3 && e.decision === "allow").length,
     examStarts: (s.log || []).filter((e) => e.type === "exam.start" && e.at > t - 7 * 86400e3).length,
+    withheld: withheldWeek(s, t),
   };
+}
+
+// ---------- site access withheld ----------
+// Maxime's answer on QA round 2 #3, "Make it visible": withholding site access can't be prevented (it is about
+// as easy as turning the extension off), so it is shown plainly while it lasts and kept in the history.
+
+/** The hands report which watched domains Gatekeeper can't see now; each period is kept in the one log. */
+export function noteWithheld(state, domains, now) {
+  const s = rollover(state, now);
+  const t = s.clock.floor;
+  const list = [...new Set(domains || [])].sort();
+  const cur = s.withheld || null;
+  if (JSON.stringify(cur ? cur.domains : []) === JSON.stringify(list)) return s;
+  let n = s;
+  if (cur && t > cur.from) n = { ...n, log: logEvent(n, "access.withheld", { domains: cur.domains.slice(0, 100), from: cur.from, to: t, minutes: Math.round((t - cur.from) / 60e3) }) };
+  return { ...n, withheld: list.length ? { domains: list, from: t } : null };
+}
+
+/** The week's withheld access: total minutes, and the domains, the most often withheld first. */
+function withheldWeek(s, t) {
+  const since = t - 7 * 86400e3;
+  const periods = (s.log || []).filter((e) => e.type === "access.withheld" && e.to > since).map((e) => ({ domains: e.domains, from: Math.max(e.from, since), to: e.to }));
+  if (s.withheld) periods.push({ domains: s.withheld.domains, from: Math.max(s.withheld.from, since), to: t });
+  if (!periods.length) return null;
+  const count = {};
+  for (const p of periods) for (const d of p.domains) count[d] = (count[d] || 0) + (p.to - p.from);
+  const domains = Object.keys(count).sort((a, b) => count[b] - count[a] || a.localeCompare(b));
+  return { minutes: Math.round(periods.reduce((a, p) => a + (p.to - p.from), 0) / 60e3), domains };
 }
 
 // ---------- today ----------

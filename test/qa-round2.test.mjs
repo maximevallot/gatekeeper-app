@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   initialState, completeSetup, setHelp, proposeRules, rollover, decide, tick, enforcement, startExam, examOn, gateRequest,
   applyGateAnswer, recordSort, guardClock, confirmTime, timeCheckNeeded, MAX_JUMP_MS, startWatch, endWatch, watchReady,
-  dropLoosen, baseDomain, ruleDomain, cleanRules, todaySummary,
+  dropLoosen, baseDomain, ruleDomain, cleanRules, todaySummary, noteWithheld, weekSummary,
 } from "../extension/engine/engine.js";
 import { applyDiff } from "../extension/engine/videos.js";
 import { catalogKind } from "../extension/engine/catalog.js";
@@ -56,13 +56,20 @@ test("#2: a real night asleep counts in full once the relay confirms it; offline
   assert.equal(s.clock.offset, 0);
 });
 
-test("#3 (gate C2): with tab addresses readable, nothing is blind, so a withheld site is counted and its closed page goes to the gate", () => {
-  // The hands report no withheld domains once "tabs" is granted; the engine then counts and closes as usual.
-  const s = setUp({ video: 0, social: 30 });
-  assert.deepEqual(enforcement(s, SAT, { withheld: [] }).blind, []);
-  assert.equal(decide(s, { url: "https://www.youtube.com/", now: SAT }).verdict, "block");
-  const after = visit(s, "https://www.instagram.com/", SAT);
-  assert.equal(after.usage.seconds.social, 5);
+test("#3 (gate C2), Maxime's \"Make it visible\": each period of withheld site access is kept, and the week shows it", () => {
+  let s = setUp({ video: 0 });
+  s = noteWithheld(s, ["youtube.com", "youtu.be"], SAT);
+  assert.deepEqual(s.withheld, { domains: ["youtu.be", "youtube.com"], from: SAT });
+  assert.equal(noteWithheld(s, ["youtube.com", "youtu.be"], SAT + 60e3).log.filter((e) => e.type === "access.withheld").length, 0, "still the same period");
+  s = noteWithheld(s, [], SAT + 2 * 3600e3);
+  assert.equal(s.withheld, null);
+  const e = s.log.filter((x) => x.type === "access.withheld");
+  assert.equal(e.length, 1);
+  assert.deepEqual([e[0].domains, e[0].minutes], [["youtu.be", "youtube.com"], 120]);
+  const w = weekSummary(s, SAT + 2 * 3600e3);
+  assert.deepEqual(w.withheld, { minutes: 120, domains: ["youtu.be", "youtube.com"] });
+  // What still blocks without that access is kept: a watched domain Gatekeeper can't see stays in the block list.
+  assert.ok(enforcement(s, SAT, { withheld: ["youtube.com"] }).block.includes("youtube.com"));
 });
 
 test("#4 (gate C4): a rule on a parent domain is judged by the catalog sites under it, and public suffixes are refused", () => {

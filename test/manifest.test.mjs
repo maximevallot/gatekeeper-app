@@ -17,8 +17,8 @@ test("no permission beyond the four it needs, and nothing that reads pages; plai
   assert.deepEqual(m.permissions.sort(), ["alarms", "declarativeNetRequest", "idle", "storage"]);
   assert.equal(m.content_scripts, undefined);
   // The Mac app's link is optional, asked for by its switch on the rules page, so installing shows no new warning.
-  assert.deepEqual(m.optional_permissions, ["nativeMessaging", "tabs"]);
-  // "tabs" is asked for only from the warning shown when site access is withheld (QA round 2, C2); not at install.
+  assert.deepEqual(m.optional_permissions, ["nativeMessaging"]);
+  // No "tabs" (Maxime, QA round 2 #3, "Make it visible"): withheld access is shown and logged, not prevented.
   assert.ok(!m.permissions.includes("tabs"));
   assert.ok(!m.permissions.includes("nativeMessaging"));
   // Only the gate is reachable from web pages, from any page a link to a closed site starts on (a narrower

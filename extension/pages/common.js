@@ -66,23 +66,10 @@ export function warnings({ incognito, blind = [] }, into) {
   }
   if (blind.length) {
     out.push(el("div", { class: "note", id: "blind-warning" },
-      el("span", {}, `Gatekeeper can't see ${blind.slice(0, 2).join(", ")}${blind.length > 2 ? ` and ${blind.length - 2} more` : ""}, so they may open without being counted. In ${extensionsPage()}, set Gatekeeper's Site access to "On all sites", or `),
-      seeTabs()));
+      el("span", {}, `Gatekeeper can't see ${blind.slice(0, 2).join(", ")}${blind.length > 2 ? ` and ${blind.length - 2} more` : ""}, so they may open without being counted. In ${extensionsPage()}, set Gatekeeper's Site access to "On all sites".`)));
   }
   for (const w of out) into.before(w);
   return out.length;
-}
-
-/**
- * QA round 2, C2: with site access withheld, the browser stops applying Gatekeeper's blocks there. Reading tab
- * addresses ("tabs") lets Gatekeeper send such a page to the gate within two seconds, and count its time.
- */
-function seeTabs() {
-  const b = el("button", { class: "link", type: "button", id: "see-tabs" }, "let Gatekeeper read tab addresses");
-  b.addEventListener("click", async () => {
-    if (await chrome.permissions.request({ permissions: ["tabs"] }).catch(() => false)) location.reload();
-  });
-  return b;
 }
 
 /** The name of the switch that lets an extension run in private windows. */

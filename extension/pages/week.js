@@ -41,6 +41,12 @@ async function show() {
   if (w.loosenAsked) {
     $("note").before(el("p", { class: "muted", id: "loosen-week" }, `You asked to loosen a rule ${w.loosenAsked} time${w.loosenAsked === 1 ? "" : "s"}; Gatekeeper agreed ${w.loosenAllowed === 0 ? "none" : w.loosenAllowed === w.loosenAsked ? "every time" : w.loosenAllowed + " of them"}.`));
   }
+  if (w.withheld) {
+    // Withheld site access, kept in the history (QA round 2 #3, "Make it visible").
+    const m = w.withheld.minutes, d = w.withheld.domains;
+    const time = m >= 90 ? `${Math.round(m / 60)} h` : `${m} min`;
+    $("note").before(el("p", { class: "muted", id: "withheld-week" }, `Access withheld for ${time} on ${d.slice(0, 2).join(", ")}${d.length > 2 ? ` and ${d.length - 2} more` : ""}.`));
+  }
   if (w.examStarts) {
     $("note").before(el("p", { class: "muted", id: "exam-week" }, `Exam mode started ${w.examStarts} time${w.examStarts === 1 ? "" : "s"} this week.`));
   }
