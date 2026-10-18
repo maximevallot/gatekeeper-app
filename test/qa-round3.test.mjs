@@ -141,3 +141,16 @@ test("#3 (chat N2): Apply on \"end exam mode\" says what can happen without a ca
   const r = applyCard(s, SAT);
   assert.match(r.state.thread.turns.at(-1).text, /tomorrow morning at the earliest/);
 });
+
+test("#3: exam mode started from the chat keeps the exam's own time the relay sends, so it can end once the exam is over", () => {
+  const THU9 = at("2026-10-22T09:00:00-04:00"), THU12 = at("2026-10-22T12:00:00-04:00");
+  const s = setUp({ video: 0 });
+  const p = chatPreview(s, { reply: "Exam mode until Thursday 12:00.", diff: [{ op: "examStart", until: "2026-10-22T12:00:00-04:00", at: "2026-10-22T09:00:00-04:00", goal: "midterm" }] }, SAT);
+  assert.equal(p.rules.exam.at, THU9);
+  const on = proposeRules(s, p.rules, SAT).state;
+  assert.equal(on.rules.exam.at, THU9);
+  assert.equal(examAt(rollover(on, THU9 + 2 * 3600e3)), THU9, "after the exam, ending at once is possible");
+  assert.equal(examAt(rollover(on, THU9 - 3600e3)), null, "not before");
+  const none = chatPreview(s, { reply: "ok", diff: [{ op: "examStart", until: THU12, at: null }] }, SAT);
+  assert.equal(proposeRules(s, none.rules, SAT).state.rules.exam.at, THU12, "without it, the exam's time is the end");
+});
