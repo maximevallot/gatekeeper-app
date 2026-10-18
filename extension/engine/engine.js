@@ -247,7 +247,11 @@ export function confirmTime(state, { server, local }) {
   if (!Number.isFinite(server) || !Number.isFinite(local)) return state;
   const offset = Math.abs(server - local) > 2 * 60e3 ? Math.round(server - local) : 0;
   const { held, ...rest } = c;
-  return { ...state, clock: { ...rest, offset, floor: Math.round(server), checkedAt: Math.round(server) } };
+  const floor = Math.round(server);
+  // Moments counted up to a wrong time ahead come back to the true one, so time is counted again from now.
+  const u = state.usage || {};
+  const upTo = Object.fromEntries(Object.entries(u.upTo || {}).map(([b, m]) => [b, Math.min(m, floor)]));
+  return { ...state, usage: { ...u, upTo, passUpTo: Math.min(u.passUpTo || 0, floor) }, clock: { ...rest, offset, floor, checkedAt: floor } };
 }
 
 /** Whether the clock jumped and the hands should check the time. */
@@ -541,11 +545,15 @@ export function tick(state, { url, title = "", focused, active, seconds, now, au
   let s = rollover(state, now);
   const t = s.clock.floor;
   const add = clamp(seconds);
-  if (add && Object.keys(s.passes || {}).length) {
-    const passes = {};
-    for (const [d, p] of Object.entries(s.passes)) if (p.secondsLeft - add > 0) passes[d] = { ...p, secondsLeft: p.secondsLeft - add };
-    s = { ...s, passes };
-  }
+  // The report is a span of real time (one-per-person design, step 1): [t - add, t], or, while the clock stands
+  // still (set back, or a jump not checked yet), the next `add` seconds after the last span, so time still
+  // passes and a pass still runs out. Passes run down by it first.
+  const addMs = Math.round(add * 1000);
+  const last = s.usage.spanEnd || 0;
+  const to = add ? (t > last ? t : last + addMs) : t;
+  const from = to - addMs;
+  if (add) s = { ...s, usage: { ...s.usage, spanEnd: to } };
+  s = runPasses(s, from, to);
   const counted = new Set();
   const twice = new Set(); // a site's own bucket also counted in its kind's: the week counts that time once
   const count = (d) => {
@@ -558,11 +566,8 @@ export function tick(state, { url, title = "", focused, active, seconds, now, au
     const d = decide(s, { url: u, now: t });
     if (d.watched && d.verdict === "allow") count(d);
   }
-  if (add && counted.size) {
-    const sec = { ...s.usage.seconds };
-    for (const k of counted) sec[k] = (sec[k] || 0) + add;
-    s = { ...s, usage: { ...s.usage, seconds: sec, twice: (s.usage.twice || 0) + add * twice.size } };
-  }
+  const span = add ? { from, to, buckets: [...counted], twice: [...twice] } : null;
+  if (span) s = countSpan(s, span);
   // A site nobody has sorted: once it has been in front for a minute, ask the relay once.
   let sort = null;
   const domain = siteDomain(url);
@@ -589,7 +594,60 @@ export function tick(state, { url, title = "", focused, active, seconds, now, au
       judge = key;
     }
   }
-  return { state: s, decision: decide(s, { url, title, now: t }), sort, judge };
+  return { state: s, decision: decide(s, { url, title, now: t }), sort, judge, span };
+}
+
+// ---------- time as spans (one Gatekeeper per person, step 1) ----------
+// Time is counted as spans of real time, not as reports. For each bucket the usage keeps the moment it has
+// counted up to (usage.upTo), and a span adds only what lies after it: two devices with YouTube in front at the
+// same moment count it once. Passes run down the same way, by one moment for all of them (usage.passUpTo), so a
+// 5-minute pass lasts 5 minutes with two browsers open. One device behaves exactly as before.
+
+/** Run the passes down by the part of [from, to] not already run. */
+function runPasses(s, from, to) {
+  const up = s.usage.passUpTo || 0;
+  const add = Math.max(0, to - Math.max(from, up)) / 1000;
+  if (!(add > 0)) return s;
+  const passes = {};
+  for (const [d, p] of Object.entries(s.passes || {})) if (p.secondsLeft - add > 0) passes[d] = { ...p, secondsLeft: p.secondsLeft - add };
+  return { ...s, passes, usage: { ...s.usage, passUpTo: Math.max(up, to) } };
+}
+
+/** Count one span against its buckets, each only past the moment it was counted up to. */
+function countSpan(s, { from, to, buckets = [], twice = [] }) {
+  const sec = { ...s.usage.seconds }, upTo = { ...(s.usage.upTo || {}) };
+  let extra = 0;
+  for (const b of new Set(buckets)) {
+    const add = Math.max(0, to - Math.max(from, upTo[b] || 0)) / 1000;
+    if (!(add > 0)) continue;
+    sec[b] = (sec[b] || 0) + add;
+    upTo[b] = Math.max(upTo[b] || 0, to);
+    if (twice.includes(b)) extra += add;
+  }
+  return { ...s, usage: { ...s.usage, seconds: sec, upTo, twice: (s.usage.twice || 0) + extra } };
+}
+
+export const MAX_SPAN_MS = MAX_TICK_SECONDS * 1000;
+
+/**
+ * Spans another device reported, in its own clock: `shift` turns them into this clock (the account's time minus
+ * the device's at the same moment). Each is cut to at most MAX_SPAN_MS, to today, and to no later than now, so
+ * a device's clock set forward or back changes nothing.
+ */
+export function applySpans(state, spans, { shift = 0, now } = {}) {
+  let s = rollover(state, now === undefined ? (state.clock && state.clock.floor) || 0 : now);
+  const t = s.clock.floor;
+  const dayFrom = s.usage.endsAt - 86400e3;
+  for (const sp of Array.isArray(spans) ? spans : []) {
+    if (!sp || !Number.isFinite(sp.from) || !Number.isFinite(sp.to)) continue;
+    const to = Math.min(sp.to + shift, t);
+    const from = Math.max(sp.from + shift, to - MAX_SPAN_MS, dayFrom);
+    if (!(to > from)) continue;
+    s = runPasses(s, from, to);
+    const buckets = (Array.isArray(sp.buckets) ? sp.buckets : []).filter((b) => typeof b === "string" && b.length < 120).slice(0, 8);
+    s = countSpan(s, { from, to, buckets, twice: Array.isArray(sp.twice) ? sp.twice : [] });
+  }
+  return s;
 }
 
 // ---------- video rules ----------
