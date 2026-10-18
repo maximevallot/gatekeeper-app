@@ -171,13 +171,15 @@ async function askAccount(req) {
 }
 
 /** The welcome is finished (or an install from before accounts starts up): make the account, with this state. */
+let onWelcome = false;
 async function createAccount() {
   if (acct && (acct.token || acct.error === "left")) return acct;
   const s = await load();
   const r = await callAccount("create", { device: { name: deviceName(), kind: "extension" }, tz: tz(), now: engineNow(), state: s });
+  const auto = !!(acct && acct.pendingCreate) || !onWelcome; // an install from before accounts: Today says so once
   if (!r.ok) { acct = { ...(acct || {}), error: r.error || "unreachable", pendingCreate: true }; await saveAccount(); return null; }
   const d = r.data;
-  acct = { accountId: d.accountId, deviceId: d.device.id, token: d.device.token, version: d.version, lastSync: Date.now(), error: null, created: Date.now() };
+  acct = { accountId: d.accountId, deviceId: d.device.id, token: d.device.token, version: d.version, lastSync: Date.now(), error: null, created: Date.now(), notice: auto };
   outbox = { seq: 0, sentUpTo: 0, spans: [], requests: [] };
   if (d.copy) await update((st) => ({ state: engine.guardClock(account.rebase(st, d.copy)) }));
   await saveAccount();
@@ -427,7 +429,8 @@ const handlers = {
     const s = engine.rollover(await load(), Date.now());
     const incognito = await chrome.extension.isAllowedIncognitoAccess();
     const seeAll = await chrome.permissions.contains(ALL_SITES);
-    return { state: s, now: Date.now(), closed: engine.closedKinds(s, Date.now()), blind, incognito, seeAll, consent: engine.consentStatus(s) };
+    return { state: s, now: Date.now(), closed: engine.closedKinds(s, Date.now()), blind, incognito, seeAll, consent: engine.consentStatus(s),
+      accountNotice: !!(acct && acct.token && acct.notice) };
   },
   async decide({ url, count }) {
     // `count`: the gate page's first look at a closed site, one more "time the gate held" for the week.
@@ -631,6 +634,10 @@ const handlers = {
     const r = await callAccount("export", {}, acct.token);
     return r.ok ? { data: r.data } : { error: r.error };
   },
+  async accountNoticed() {
+    if (acct) { acct = { ...acct, notice: false }; await saveAccount(); }
+    return { ok: true };
+  },
   async syncNow() {
     const r = await sync();
     return { ok: !!r };
@@ -644,6 +651,7 @@ const handlers = {
   async watch({ goal }) {
     await update((s) => ({ state: engine.startWatch(s, { goal }, Date.now()) }));
     // Finishing the welcome makes the account (said plainly on the welcome page).
+    onWelcome = true;
     if (!(acct && acct.token)) await createAccount(); else sendLater({ type: "watch", goal });
     return { ok: true };
   },
@@ -660,6 +668,7 @@ const handlers = {
   async setup({ kinds, goal }) {
     const out = await update((s) => engine.completeSetup(s, { kinds, goal }, Date.now()));
     // Finishing the welcome makes the account (said plainly on the welcome page); a device that joined sends it.
+    onWelcome = true;
     if (!(acct && acct.token)) await createAccount(); else sendLater({ type: "setup", kinds, goal });
     return { now: out.now, later: out.later, from: out.from };
   },

@@ -26,7 +26,7 @@ function ring(k, reopensAt) {
 }
 
 async function show() {
-  const { state, now, blind } = await ask("state");
+  const { state, now, blind, accountNotice } = await ask("state");
   const t = todaySummary(state, now);
   if (!t.setupDone) {
     $("rings").replaceChildren(el("p", { class: "lead", style: "grid-column: 1 / -1" }, "Gatekeeper isn't set up yet. It takes a minute."));
@@ -58,6 +58,15 @@ async function show() {
   else if (blind && blind.length) { $("mode").textContent = "Can't see some sites"; $("mode").className = "pill warn"; }
   else if (t.waiting) { $("mode").textContent = "Change tomorrow"; $("mode").className = "pill warn"; }
   $("change").replaceChildren(chatIcon(), "Change something");
+  // An install from before accounts got one on update (0.3.0): said plainly, once.
+  const prev = document.getElementById("account-today");
+  if (prev) prev.remove();
+  if (accountNotice) {
+    const ok = el("button", { class: "link", type: "button" }, "OK");
+    ok.addEventListener("click", async () => { await ask("accountNoticed"); show(); });
+    $("rings").before(el("div", { class: "note", id: "account-today" },
+      el("span", {}, "Gatekeeper now keeps your rules, today's minutes and your talk with it in your Gatekeeper account, so your other devices can follow the same rules. Never the pages you visit. Leave or delete it in your rules. "), ok));
+  }
   // Withheld site access, said plainly with the one step that restores it (QA round 2 #3, "Make it visible").
   const old = document.getElementById("blind-today");
   if (old) old.remove();

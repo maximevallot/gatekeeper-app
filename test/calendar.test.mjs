@@ -57,5 +57,5 @@ test("the calendar is read again once a day; Claude help's list says what goes t
   assert.ok(calendarDue(withCal(), MON + 25 * 3600e3));
   assert.ok(/calendar/.test(WHATS_SENT.find((w) => w.what === "The gate").sent));
   assert.ok(/exam mode/.test(WHATS_SENT.find((w) => /talking/.test(w.what)).sent));
-  assert.equal(CONSENT.help, 3);
+  assert.ok(CONSENT.help >= 3); // 4 since 0.3.0: through the account
 });

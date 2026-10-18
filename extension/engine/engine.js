@@ -48,7 +48,7 @@ export const MAX_ALLOWED_VIDEOS = 50; // judged videos given a rule of their own
 
 // The version of each consent text. Raise one when what that switch sends changes: the user is asked again.
 // talk: the gate. sorting: unknown sites. chat: the rules chat. judge: video rules judged by Claude.
-export const CONSENT = { talk: 1, sorting: 1, chat: 1, judge: 1, help: 3 };
+export const CONSENT = { talk: 1, sorting: 1, chat: 1, judge: 1, help: 4 }; // help 4: through your account (0.3.0)
 
 // "Claude help": one yes for everything below. Raise CONSENT.help whenever this list changes, so the user is
 // asked again. The pages show this list, word for word, before the first request.
@@ -60,7 +60,7 @@ export const WHATS_SENT = [
   { what: "Video rules", sent: "a YouTube video's title and channel, and the wording of your video rules", when: "once per video you open, when you have video rules" },
   { what: "Sorting new sites", sent: "the site's name and page title", when: "once per site Gatekeeper doesn't know, after a minute on it" },
 ];
-export const SENT_TO = "Each request also carries a random install number. It goes to Gatekeeper's relay, which asks Anthropic's Claude and keeps none of it. Nothing else leaves this browser: never page content, addresses, or other tabs. Your talk with Gatekeeper and your calendar link are kept on this device. When this computer's clock jumps, Gatekeeper asks its relay for the time, with nothing sent along.";
+export const SENT_TO = "These go through your Gatekeeper account on Gatekeeper's server, which asks Anthropic's Claude; Claude keeps none of it. Your account keeps your rules, your goal, today's minutes per kind and per site for 30 days, exam mode, the last 50 messages of your talk with Gatekeeper, and your requests to loosen a rule with their reasons, so your other devices follow the same rules. Never page content, addresses or other tabs, and never your calendar link: only the titles and times of the next exams on it. When this computer's clock jumps, Gatekeeper asks its server for the time, with nothing sent along.";
 
 export function initialState() {
   return {

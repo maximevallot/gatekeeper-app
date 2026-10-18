@@ -116,3 +116,13 @@ Without the Mac app link, no permission is added, and the update shows no new wa
 - Claude help's list of what is sent changed, so its consent version went up and users are asked again.
 
 **The time check (0.2):** when the computer's clock jumps by more than 15 minutes (after sleep, or when someone changes it), the extension sends Gatekeeper's relay a plain HEAD request and reads the time from the answer's Date header. Nothing is sent with it: no install number, no data. This happens with Claude help off too, so the privacy policy's 0.2.0 text needs a sentence for it. It keeps exam mode and the day from being ended by moving the clock (QA round 2, C1).
+
+## 0.3.0: one Gatekeeper per person (branch `account`, not submitted)
+
+Follows section 4 of the one-per-person design (`~/brain/outputs/html/2026-10-17-gatekeeper-one-per-person.html`). To settle with Maxime before submitting:
+
+- **What the relay keeps, per account:** rules and the goal, today's minutes per kind and per site (30 days of history), exam mode, the last 50 chat messages, requests to loosen a rule with their reasons, sorted sites and judged videos, the next 48 hours of calendar exam titles and times (never the link), the time zone, and the list of devices (a name like "Brave on Mac" and a hash of each device's key). Never page addresses or page content.
+- **Data boxes:** Web history and Personal communications stay ticked, and their descriptions now say they are stored. User activity becomes yes, since minutes per kind are kept on a server. No personally identifiable information box until email sign-in.
+- **Permissions:** none added; the relay is already a host permission.
+- **The pages say it plainly:** the welcome says that finishing makes the account and what it keeps. Today says it once to an install that got its account on update. Claude help's list (consent version 4) says the requests go through the account.
+- **Privacy policy:** needs what is kept and for how long, Cloudflare as the processor, Leave, Delete and Get a copy (all on the rules page), and the time check. The live /privacy stays as it is until 0.1.1 is approved, and the 0.3.0 text is the relay session's.
