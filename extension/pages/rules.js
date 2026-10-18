@@ -3,6 +3,7 @@
 import { KINDS, KIND_ORDER, catalogKind } from "../engine/catalog.js";
 import { DEFAULT_MINUTES, label, examOn } from "../engine/engine.js";
 import { videoName } from "../engine/videos.js";
+import { calendarProblem, CALENDAR_HELP } from "../engine/calendar.js";
 import {
   ask, el, when, clock, stepper, checkWorker, warnings, whatsSentToggle, chatIcon, privateToggle, extensionsPage,
   getAppearance, setAppearance, examForm,
@@ -339,10 +340,13 @@ $("loosen-form").addEventListener("submit", async (e) => {
 
 function renderCalendar() {
   const c = got.state.calendar;
+  // Connected with its next deadline, or not working and why (Maxime's re-test, 2026-10-18).
+  const next = c && (c.events || []).find((e) => e.start >= got.now);
+  const read = c && c.fetchedAt ? when(c.fetchedAt).replace(/^today at /, "today, ") : "";
   $("calendar-sub").textContent = !c
-    ? "Paste a calendar link once, and exam mode offers itself before an exam. It's read on this computer only."
-    : c.error ? `Couldn't read the calendar (${c.error}).`
-    : `Connected: ${c.events.length} event${c.events.length === 1 ? "" : "s"} in the next two weeks. Read on this computer once a day.`;
+    ? "Paste a calendar feed link once, and exam mode offers itself before an exam. It's read on this computer only."
+    : c.error ? `Not working: ${CALENDAR_HELP[c.error] || (c.error === "unreachable" ? "it couldn't be reached. Gatekeeper tries again in an hour." : `it couldn't be read (${c.error}).`)}`
+    : `Connected${next ? `: next, ${next.title}, ${when(next.start)}` : ", with nothing in the next two weeks"}. Last read ${read}.`;
   $("calendar-edit").textContent = c ? "Disconnect" : "Connect";
 }
 $("calendar-edit").addEventListener("click", async () => {
@@ -354,12 +358,22 @@ $("calendar-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const raw = $("calendar-url").value.trim().replace(/^webcals?:\/\//i, "https://");
   let origin;
-  try { origin = new URL(raw).origin; } catch { saved("That isn't a calendar link"); return; }
+  try { origin = new URL(raw).origin; } catch { $("calendar-hint").textContent = CALENDAR_HELP.bad_url; saved("That isn't a calendar link"); return; }
+  // A Google share link is said at once, before asking the browser for anything.
+  const problem = calendarProblem(raw);
+  if (problem) { $("calendar-hint").textContent = "Not connected. " + CALENDAR_HELP[problem]; saved("Not connected"); return; }
   // Reading the link needs the browser's yes for that one site, asked inside the click.
   chrome.permissions.request({ origins: [origin + "/*"] }).then(async (granted) => {
     if (!granted) { saved("Not connected: Gatekeeper needs to read that site"); return; }
     const r = await ask("setCalendar", { url: raw }).catch(() => ({ refused: "unreachable" }));
-    saved(r.refused ? "Not connected" : r.error ? `Connected, but couldn't read it yet (${r.error})` : `Connected: ${r.events} events`);
+    if (r.refused) {
+      // Said plainly, with where to find the right link; the field stays open to paste it.
+      $("calendar-hint").textContent = "Not connected. " + (CALENDAR_HELP[r.refused] || "Gatekeeper's background didn't answer; try again.");
+      saved("Not connected");
+      await load();
+      return;
+    }
+    saved(r.error ? `Connected, but couldn't read it yet (${r.error})` : `Connected: ${r.events} events`);
     $("calendar-form").classList.add("hidden");
     await load();
   });

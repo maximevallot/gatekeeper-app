@@ -58,3 +58,27 @@ export function parseIcs(text) {
 
 /** Titles that mean an exam. */
 export const EXAM_WORDS = /\b(exam|midterm|mid-term|final|quiz|test|partiel|examen)\b/i;
+
+/**
+ * A link that can't be a feed, said plainly (Maxime's re-test, 2026-10-18): Google Calendar's share and embed links
+ * are web pages one signs in to, not the iCalendar feed Gatekeeper reads.
+ */
+export function calendarProblem(raw) {
+  let u;
+  try { u = new URL(String(raw || "").trim().replace(/^webcals?:\/\//i, "https://")); } catch { return null; } // calendarUrl refuses it
+  if (u.hostname === "calendar.google.com" && !/\.ics$/i.test(u.pathname) && !/\/ical\//.test(u.pathname)) return "google_share";
+  return null;
+}
+
+/** Whether a read answer is an iCalendar feed. */
+export function isIcs(text) {
+  return /BEGIN:VCALENDAR/.test(String(text || "").slice(0, 5000));
+}
+
+/** What to say when a calendar link isn't a feed: where each service gives the right one. */
+export const CALENDAR_HELP = {
+  google_share: "That's Google Calendar's share link, a page you sign in to. Gatekeeper needs the calendar's feed: in Google Calendar, open Settings, pick the calendar, then Integrate calendar › \"Secret address in iCal format\" (it ends in .ics).",
+  not_ical: "That link opens a web page, not a calendar feed. In Canvas: Calendar › Calendar Feed. In Google Calendar: Settings › the calendar › Integrate calendar › \"Secret address in iCal format\" (it ends in .ics).",
+  sign_in: "That link asks to sign in, so it isn't a feed. In Canvas: Calendar › Calendar Feed. In Google Calendar: Settings › the calendar › Integrate calendar › \"Secret address in iCal format\".",
+  bad_url: "That isn't a calendar feed link. Paste the feed's address (it usually ends in .ics).",
+};

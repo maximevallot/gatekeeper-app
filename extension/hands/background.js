@@ -84,7 +84,7 @@ async function readCalendar(force = false) {
   if (!s.calendar || (!force && !engine.calendarDue(s, Date.now()))) return;
   try {
     const res = await fetch(s.calendar.url, { credentials: "omit", cache: "no-store" });
-    if (!res.ok) throw new Error("http_" + res.status);
+    if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? "sign_in" : "http_" + res.status);
     const text = (await res.text()).slice(0, 2_000_000);
     await update((st) => ({ state: engine.recordCalendar(st, text, Date.now()) }));
   } catch (e) {
@@ -394,6 +394,11 @@ const handlers = {
     if (out.refused) return { refused: out.refused };
     if (out.url) await readCalendar(true);
     const c = state.calendar;
+    // The first read decides: a link that isn't a feed is not kept, and the page says what is needed.
+    if (c && ["not_ical", "sign_in"].includes(c.error)) {
+      await update((s) => engine.setCalendar(s, null));
+      return { refused: c.error };
+    }
     return { ok: true, events: c ? c.events.length : 0, error: c && c.error };
   },
   async dismissOffer({ offer }) {

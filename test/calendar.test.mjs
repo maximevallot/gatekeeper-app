@@ -59,3 +59,23 @@ test("the calendar is read again once a day; Claude help's list says what goes t
   assert.ok(/exam mode/.test(WHATS_SENT.find((w) => /talking/.test(w.what)).sent));
   assert.equal(CONSENT.help, 3);
 });
+
+test("Maxime's re-test: a Google share link is refused with Google's steps; a page that isn't a feed is said, not read as empty", async () => {
+  const { calendarProblem, isIcs, CALENDAR_HELP } = await import("../extension/engine/calendar.js");
+  const { calendarStatus, chatRequest } = await import("../extension/engine/engine.js");
+  for (const url of ["https://calendar.google.com/calendar/u/0?cid=bWF4aW1l", "https://calendar.google.com/calendar/embed?src=x%40gmail.com", "https://calendar.google.com/calendar/r"]) {
+    assert.equal(setCalendar(setUp(), url).refused, "google_share", url);
+  }
+  assert.equal(calendarProblem("https://calendar.google.com/calendar/ical/x%40gmail.com/private-abc/basic.ics"), null, "the secret iCal address is a feed");
+  assert.match(CALENDAR_HELP.google_share, /Integrate calendar › "Secret address in iCal format"/);
+  assert.ok(isIcs(ICS) && !isIcs("<html>Sign in</html>"));
+  const s = recordCalendar(setCalendar(setUp(), "https://example.edu/feed.ics").state, "<html>Sign in</html>", MON);
+  assert.equal(s.calendar.error, "not_ical");
+  assert.deepEqual(calendarStatus(s), { status: "not_working", lastRead: "2026-10-19T20:00:00-04:00", events: 0 });
+  // The chat knows the calendar's state, and only that: no link, no titles.
+  const ok = { ...withCal(), installId: "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f" };
+  const payload = chatRequest(setHelp(ok, true), { message: "are you connected to my calendar now?", now: MON }).payload;
+  assert.deepEqual(payload.calendar, { status: "connected", lastRead: "2026-10-19T20:00:00-04:00", events: 3 });
+  assert.ok(!JSON.stringify(payload).includes("canvas.mit.edu") && !JSON.stringify(payload).includes("Midterm"));
+  assert.deepEqual(chatRequest(setHelp({ ...setUp(), installId: "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f" }, true), { message: "hi", now: MON }).payload.calendar, { status: "none", lastRead: null, events: 0 });
+});

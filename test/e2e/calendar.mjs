@@ -21,7 +21,9 @@ try {
   exam.setUTCSeconds(0, 0);
   const z = (n) => String(n).padStart(2, "0");
   const dt = `${exam.getUTCFullYear()}${z(exam.getUTCMonth() + 1)}${z(exam.getUTCDate())}T${z(exam.getUTCHours())}${z(exam.getUTCMinutes())}00Z`;
-  const feed = createServer((_, res) => {
+  const feed = createServer((req, res) => {
+    // A web page that isn't a feed, like a calendar's share page (Maxime's re-test).
+    if (req.url.startsWith("/share")) { res.writeHead(200, { "content-type": "text/html" }); res.end("<html><title>Sign in</title>Sign in to see this calendar</html>"); return; }
     res.writeHead(200, { "content-type": "text/calendar" });
     res.end(`BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:15.401 Midterm\r\nDTSTART:${dt}\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nSUMMARY:Office hours\r\nDTSTART:${dt}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`);
   });
@@ -49,10 +51,20 @@ try {
   const base = (await sw.evaluate(`chrome.runtime.getURL("")`)).replace(/\/$/, "");
   await p.send("Page.enable");
   await p.send("Page.navigate", { url: base + "/pages/rules.html" }); await sleep(1000);
+  // Maxime's re-test: Google Calendar's share link is refused at once, with Google's own steps.
+  await p.evaluate(`document.getElementById('calendar-edit').click(); document.getElementById('calendar-url').value = 'https://calendar.google.com/calendar/u/0?cid=bWF4aW1lQGV4YW1wbGUuY29t'; document.getElementById('calendar-form').requestSubmit();`);
+  await sleep(800);
+  const hint = await p.evaluate(`document.getElementById('calendar-hint').textContent`);
+  check("a Google share link is refused with Google's steps", /share link/.test(hint) && /Secret address in iCal format/.test(hint), hint);
+  // A web page instead of a feed: read once, found not to be one, not kept, and said.
+  const page = await p.evaluate(`new Promise(r => chrome.runtime.sendMessage({ type: 'setCalendar', url: 'http://127.0.0.1:${feed.address().port}/share' }, r))`);
+  let st0 = await sw.evaluate(`chrome.storage.local.get('state').then(r => r.state)`);
+  check("a link that isn't a feed is refused and not kept", page && page.refused === "not_ical" && !st0.calendar, { page, calendar: st0.calendar });
   const r = await p.evaluate(`new Promise(r => chrome.runtime.sendMessage({ type: 'setCalendar', url: 'http://127.0.0.1:${feed.address().port}/cal.ics' }, r))`);
   check("a pasted calendar link is read on this computer", r && r.ok && r.events === 2, r);
   await p.send("Page.reload"); await sleep(1000);
-  check("the rules page says it's connected", /Connected: 2 events/.test(await p.evaluate(`document.getElementById('calendar-sub').textContent`)));
+  const sub = await p.evaluate(`document.getElementById('calendar-sub').textContent`);
+  check("the rules page says it's connected, with its next deadline and when it was read", /^Connected: next, 15\.401 Midterm/.test(sub) && /Last read/.test(sub), sub);
 
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(1000);
   const offer = await p.evaluate(`document.getElementById('offer').classList.contains('hidden') ? '' : document.getElementById('offer-text').textContent`);

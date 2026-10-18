@@ -23,7 +23,7 @@
 
 import { KINDS, hostOf, matches, PUBLIC_SUFFIXES, ruleDomain, isStudyHost, isSearchPage, STUDY_DOMAINS, SEARCH_ALLOW } from "./catalog.js";
 export { PUBLIC_SUFFIXES, ruleDomain };
-import { calendarUrl, parseIcs, EXAM_WORDS } from "./calendar.js";
+import { calendarUrl, parseIcs, EXAM_WORDS, calendarProblem, isIcs } from "./calendar.js";
 import {
   MAX_JUDGED, videoKeyOf, videoSiteOf, videoRulesKey, videoName, cleanVideos, tightenVideos,
   describeVideoChanges, matchWords, applyDiff, rulesForChat,
@@ -1264,6 +1264,8 @@ export function chatRequest(state, { message, history = [], now }) {
       // A no holds every loosening until the morning: the relay then drops loosening ops and says so (QA round 3, N1).
       // A no now holds only its own rule (2026-10-18), so loosening as a whole is never locked; the card says which.
       loosenLocked: false,
+      // So "are you connected to my calendar?" gets a true answer (Maxime's re-test): the state only.
+      calendar: calendarStatus(s),
     },
   };
 }
@@ -1601,6 +1603,8 @@ export const OFFER_AHEAD_MS = 48 * 3600e3;
 
 export function setCalendar(state, raw) {
   if (raw === null || raw === "") return { state: { ...state, calendar: null } };
+  const problem = calendarProblem(raw);
+  if (problem) return { state, refused: problem };
   const url = calendarUrl(raw);
   if (!url) return { state, refused: "bad_url" };
   return { state: { ...state, calendar: { url, events: [], fetchedAt: 0, error: null } }, url };
@@ -1616,6 +1620,8 @@ export function calendarDue(state, now) {
 export function recordCalendar(state, text, now) {
   const c = state.calendar;
   if (!c) return state;
+  // A web page (a share link, a sign-in page) is not a feed: it is said, never read as "no events".
+  if (!isIcs(text)) return calendarFailed(state, "not_ical", now);
   const t = Math.max(now, (state.clock && state.clock.floor) || 0);
   const events = parseIcs(text).filter((e) => e.start >= t - 3600e3 && e.start <= t + 14 * 86400e3).slice(0, 50).map(({ title, start }) => ({ title, start }));
   return { ...state, calendar: { ...c, events, fetchedAt: t, error: null } };
@@ -1626,6 +1632,13 @@ export function calendarFailed(state, error, now) {
   if (!c) return state;
   const t = Math.max(now, (state.clock && state.clock.floor) || 0);
   return { ...state, calendar: { ...c, fetchedAt: t, error: String(error).slice(0, 80) } };
+}
+
+/** The calendar's state for the chat (/rules): connected or not working, when last read, how many events. No link, no titles. */
+export function calendarStatus(state) {
+  const c = state.calendar;
+  if (!c) return { status: "none", lastRead: null, events: 0 };
+  return { status: c.error || !c.fetchedAt ? "not_working" : "connected", lastRead: c.fetchedAt ? localIso(c.fetchedAt) : null, events: (c.events || []).length };
 }
 
 /** The next deadlines for the gate: up to five, title and date. */
