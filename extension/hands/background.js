@@ -425,6 +425,12 @@ const handlers = {
     await update((s) => ({ state: engine.dropLoosen(s, Date.now()) }));
     return { ok: true };
   },
+  // The welcome tab says which step it is on, so a reload of the extension (turning on private windows does one)
+  // can bring it back there (tester run, #3).
+  async welcomeStep({ step }, sender) {
+    await chrome.storage.local.set({ welcome: { step, tabId: sender && sender.tab ? sender.tab.id : null, at: Date.now() } });
+    return { ok: true };
+  },
   async mac() {
     await macSync(true);
     // As macError: a reply with "error" would read to the page's ask() as the worker failing.
@@ -458,9 +464,24 @@ const handlers = {
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (sender.id !== chrome.runtime.id || !handlers[msg && msg.type]) return;
-  handlers[msg.type](msg).then(reply, (e) => reply({ error: String(e) }));
+  handlers[msg.type](msg, sender).then(reply, (e) => reply({ error: String(e) }));
   return true;
 });
+
+// The welcome tab closing is noted. A worker that starts within a few seconds of it is the extension reloading (turning
+// on private windows does that), so it reopens the welcome at its step; a tab the user closed stays closed.
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const { welcome } = await chrome.storage.local.get("welcome");
+  if (welcome && welcome.tabId === tabId) await chrome.storage.local.set({ welcome: { ...welcome, closedAt: Date.now() } });
+});
+(async () => {
+  const { welcome } = await chrome.storage.local.get("welcome");
+  if (!welcome || welcome.step === "finished" || Date.now() - welcome.at > 30 * 60e3) return;
+  if (welcome.closedAt && Date.now() - welcome.closedAt > 10e3) return; // closed by the user, a while ago
+  if (welcome.tabId !== null && (await chrome.tabs.get(welcome.tabId).catch(() => null))) return;
+  const open = (await chrome.tabs.query({ url: chrome.runtime.getURL("pages/welcome.html") + "*" }).catch(() => [])).length;
+  if (!open) chrome.tabs.create({ url: chrome.runtime.getURL("pages/welcome.html" + (welcome.step === "done" ? "?step=done" : "")) });
+})();
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === "install") chrome.tabs.create({ url: chrome.runtime.getURL("pages/welcome.html") });

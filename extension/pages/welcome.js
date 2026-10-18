@@ -98,6 +98,27 @@ $("start").addEventListener("click", async () => {
   checkPrivate();
 });
 
+// Where setup is, for the worker: turning on private windows reloads the extension and closes this tab, and the
+// worker then reopens it at this step (tester run, #3).
+const step = (name) => ask("welcomeStep", { step: name }).catch(() => null);
+const doneObserver = new MutationObserver(() => { if (!$("done").classList.contains("hidden")) step("done"); });
+doneObserver.observe($("done"), { attributes: true, attributeFilter: ["class"] });
+step(new URLSearchParams(location.search).get("step") === "done" ? "done" : "start");
+for (const a of document.querySelectorAll('#done a')) a.addEventListener("click", () => step("finished"));
+
+// Reopened after the reload: setup was finished, so the done screen, with the private-windows step checked again.
+if (new URLSearchParams(location.search).get("step") === "done") {
+  (async () => {
+    const { state } = await ask("state");
+    for (const id of ["watch", "ask"]) $(id).classList.add("hidden");
+    if (document.getElementById("join-card")) $("join-card").classList.add("hidden");
+    $("done-title").textContent = state.watch && !state.watch.ended ? "You're watching" : "You're set";
+    $("summary").textContent = Object.entries(state.rules.kinds).map(([k, v]) => `${label(k)}: ${minutesText(v.minutes)}`).join(". ") + (Object.keys(state.rules.kinds).length ? "." : "");
+    $("done").classList.remove("hidden");
+    checkPrivate();
+  })();
+}
+
 // Private windows: extensions are off there unless the user allows it, and every site would open.
 async function checkPrivate() {
   const { incognito } = await ask("state").catch(() => ({}));

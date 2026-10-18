@@ -130,6 +130,26 @@ try {
   // QA round 3 #5: without access to every site (this build doesn't hold it), Today says sites it doesn't know stay open.
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(1000);
   check("QA round 3 #5: exam mode without every site says unknown sites stay open, with a way to close them", /stay open in this exam mode/.test(await p.evaluate(`(document.getElementById('exam-open-today') || {}).textContent || ''`)));
+
+  // Tester run, #3: turning on private windows reloads the extension and closes the welcome tab; it comes back at the
+  // done screen. Here the welcome is reopened at its done step, then the extension reloads as that switch makes it.
+  await p.send("Page.navigate", { url: base + "/pages/welcome.html?step=done" }); await sleep(1500);
+  // What that reload does, in steps: the welcome tab closes and the worker stops. (Headless Brave disables an extension
+  // loaded from the command line when the real switch is flipped, so the switch itself can't be used here.)
+  const welcomeTab = (await targets()).find((t) => t.type === "page" && t.url.includes("/pages/welcome.html?step=done"));
+  await p.send("Target.closeTarget", { targetId: welcomeTab.id });
+  await sleep(500);
+  const swT = (await targets()).find((t) => t.type === "service_worker");
+  const browserWs = (await (await fetch(`http://127.0.0.1:${process.env.CDP_PORT || 9334}/json/version`)).json()).webSocketDebuggerUrl;
+  await new Promise((res) => { const ws = new WebSocket(browserWs); ws.onopen = () => { ws.send(JSON.stringify({ id: 1, method: "Target.closeTarget", params: { targetId: swT.id } })); setTimeout(() => { ws.close(); res(); }, 800); }; });
+  // Chrome brings another tab to the front; that switch wakes Gatekeeper's worker.
+  const blank = (await targets()).find((t) => t.type === "page" && t.url === "about:blank");
+  const ctl = await connect((t) => t.id === blank.id);
+  await ctl.send("Target.createTarget", { url: "about:blank" });
+  await sleep(3000);
+  const back = await connect((t) => t.type === "page" && t.url.includes("/pages/welcome.html?step=done"));
+  await sleep(1200);
+  check("tester #3: after the reload, the welcome comes back at the done screen", !(await back.evaluate(`document.getElementById('done').classList.contains('hidden')`)) && /You're set/.test(await back.evaluate(`document.getElementById('done-title').textContent`)));
 } catch (e) {
   console.log("FAIL", e.message); failures++;
 }
