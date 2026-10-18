@@ -232,7 +232,9 @@ export function applyDiff(rules, diff) {
         // The relay sends local time with its offset ("2026-10-22T08:30:00-04:00"); a number is taken as ms.
         const until = typeof op.until === "number" ? op.until : Date.parse(String(op.until || ""));
         if (!Number.isFinite(until)) { skipped.push(op); break; }
-        r.exam = { until, goal: text(op.goal, 200) || (r.exam && r.exam.goal) || "" };
+        // The exam's own time, when the student said it ("exam thursday 9am"): ending at once depends on it.
+        const at = op.at == null ? NaN : typeof op.at === "number" ? op.at : Date.parse(String(op.at));
+        r.exam = { until, goal: text(op.goal, 200) || (r.exam && r.exam.goal) || "", ...(Number.isFinite(at) && at <= until ? { at } : {}) };
         break;
       }
       case "examEnd":
