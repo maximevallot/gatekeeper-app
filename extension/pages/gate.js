@@ -46,6 +46,10 @@ async function show() {
     const m = d.budgetMinutes;
     $("used").textContent = `You used your ${m} minute${m === 1 ? "" : "s"} of ${d.label.toLowerCase()} today.`;
   }
+  // The clock moved, or the computer slept: the gate says why it may still hold (QA round 3, first-run N1).
+  if (decided.checkingTime && !document.getElementById("clock-gate")) {
+    $("used").after(el("div", { class: "small muted", id: "clock-gate" }, "Gatekeeper is checking the time with its server (your computer slept, or its clock moved)."));
+  }
   $("goal").textContent = goal || "";
   $("goal-box").classList.toggle("hidden", !goal);
   $("rules-link").href = chrome.runtime.getURL("pages/rules.html");

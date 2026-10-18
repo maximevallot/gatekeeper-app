@@ -25,9 +25,9 @@ process.on("exit", () => { for (const k of kill) try { k(); } catch {} (() => { 
 try {
   // One local server: the relay's time (HEAD / with a real Date header), a course page with a nocookie player,
   // and a site Gatekeeper doesn't know.
-  let timeAsked = 0;
+  let timeAsked = 0, timeDown = false;
   const server = createServer((req, res) => {
-    if (req.method === "HEAD") { timeAsked++; res.writeHead(200, { date: new Date().toUTCString() }); res.end(); return; }
+    if (req.method === "HEAD") { timeAsked++; if (timeDown) { req.socket.destroy(); return; } res.writeHead(200, { date: new Date().toUTCString() }); res.end(); return; }
     res.writeHead(200, { "content-type": "text/html" });
     res.end(req.url.startsWith("/course")
       ? '<title>Course page</title><iframe id="nc" src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"></iframe>'
@@ -85,7 +85,8 @@ try {
   await sleep(2500);
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(1200);
   const today = await p.evaluate(`(document.getElementById('blind-today') || {}).textContent || ''`);
-  check("#3: Today says plainly that Gatekeeper can't see youtube.com, with the step to fix it", /can't see/.test(today) && /youtube\.com/.test(today) && /On all sites/.test(today), today);
+  check("#3: Today says plainly that Gatekeeper can't see youtube.com, with the step to fix it", /can't see/.test(today) && /youtube\.com/.test(today) && /Automatically allow access on the following sites/.test(today), today);
+  check("QA round 3 #7: with Brave's own words, and a button that opens Gatekeeper's page", await p.evaluate(`!!document.querySelector('#blind-today #open-access')`));
   check("#3: the toolbar badge flags it", (await sw.evaluate(`chrome.action.getBadgeText({})`)) === "!");
   let href = "";
   const again = await connect((t) => t.type === "page" && t.url.startsWith("brave://extensions"), CDP_PORT).catch(() => null);
@@ -126,6 +127,26 @@ try {
   href = "";
   for (let i = 0; i < 10 && !href.includes("/pages/gate.html"); i++) { await sleep(500); href = await p.evaluate("location.href").catch(() => ""); }
   check("#2: YouTube is still closed", href.includes("/pages/gate.html"), href);
+
+  // QA round 3 #6, offline: the clock walked forward 14 minutes at a time doesn't end exam mode or start tomorrow.
+  timeDown = true;
+  let st0 = await st();
+  const day0 = st0.usage.day;
+  await sw.evaluate(`(() => { self.__step = 0; Date.now = () => self.__realNow() + 3 * 86400e3 + self.__step * 14 * 60e3; return 1; })()`);
+  for (let i = 1; i <= 8; i++) { await sw.evaluate(`self.__step = ${i}`); await sleep(2600); }
+  s = await st();
+  check("#6: 14-minute steps offline: exam mode still on, no new day, and the clock is held", s.rules.exam && s.rules.exam.until === until && s.usage.day === day0 && s.clock.held && s.clock.held.kind === "drift",
+    { day: s.usage.day, day0, held: s.clock.held, exam: s.rules.exam && s.rules.exam.until });
+  // QA round 3 #2, offline: then a night asleep, past 4:00. The day turns after 20 s without the relay; exam mode holds.
+  const next4 = (() => { const d = new Date(); d.setHours(4, 0, 0, 0); if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1); return d.getTime(); })();
+  const sleepMs = next4 - Date.now() + 3600e3;
+  await sw.evaluate(`(() => { const base = self.__realNow() + 3 * 86400e3 + 8 * 14 * 60e3 + ${sleepMs}; const t0 = self.__realNow(); Date.now = () => base + (self.__realNow() - t0); return 1; })()`);
+  await sleep(26000);
+  s = await st();
+  check("#2: after a night asleep offline, the day turned over", s.usage.day !== day0, { day: s.usage.day, day0, held: s.clock.held });
+  check("#2: exam mode still holds until the relay's time comes", !!(s.rules.exam && s.rules.exam.until === until), s.rules.exam);
+  await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(1200);
+  check("#2: Today says Gatekeeper is checking the time", /checking the time/.test(await p.evaluate(`(document.getElementById('clock-today') || {}).textContent || ''`)));
 } catch (e) {
   console.log("FAIL", e.message); failures++;
 }

@@ -1,7 +1,7 @@
 // Today, in the toolbar popup: a ring per watched kind (minutes left, or a lock when closed), the goal, and
 // the way to change something.
 import { todaySummary } from "../engine/engine.js";
-import { ask, el, svg, lockIcon, chatIcon, clock, checkWorker, examForm, extensionsPage } from "./common.js";
+import { ask, el, svg, lockIcon, chatIcon, clock, checkWorker, examForm, extensionsPage, askEverySite, siteAccessHelp, openAccessButton } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 const C = 2 * Math.PI * 40;
@@ -26,7 +26,7 @@ function ring(k, reopensAt) {
 }
 
 async function show() {
-  const { state, now, blind, accountNotice } = await ask("state");
+  const { state, now, blind, seeAll, accountNotice } = await ask("state");
   const t = todaySummary(state, now);
   if (!t.setupDone) {
     $("rings").replaceChildren(el("p", { class: "lead", style: "grid-column: 1 / -1" }, "Gatekeeper isn't set up yet. It takes a minute."));
@@ -51,7 +51,8 @@ async function show() {
   if (t.offer) {
     const when = new Date(t.offer.start).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
     $("offer-text").textContent = `${t.offer.title}, ${when}. Start exam mode until then?`;
-    $("offer-start").onclick = async () => { await ask("startExam", { until: t.offer.start, goal: t.offer.title, source: "calendar" }); show(); };
+    // The offered event is the exam: its start is fixed as exam mode's own time (QA round 3, N1).
+    $("offer-start").onclick = async () => { await askEverySite(); await ask("startExam", { until: t.offer.start, at: t.offer.start, goal: t.offer.title, source: "calendar" }); show(); };
     $("offer-no").onclick = async () => { await ask("dismissOffer", { offer: t.offer }); show(); };
   }
   if (t.exam) { $("mode").textContent = `Exam mode until ${clock(t.exam.until)}`; $("mode").className = "pill closed"; }
@@ -72,7 +73,19 @@ async function show() {
   if (old) old.remove();
   if (blind && blind.length) {
     $("rings").before(el("div", { class: "note", id: "blind-today" },
-      el("span", {}, `Gatekeeper can't see ${blind.slice(0, 2).join(", ")}${blind.length > 2 ? ` and ${blind.length - 2} more` : ""}, so time there isn't counted and a closed site may open. To fix it: ${extensionsPage()} → Gatekeeper → Site access → On all sites.`)));
+      el("span", {}, `Gatekeeper can't see ${blind.slice(0, 2).join(", ")}${blind.length > 2 ? ` and ${blind.length - 2} more` : ""}, so time there isn't counted and a closed site may open. To fix it, on Gatekeeper's page in ${extensionsPage()}, ${siteAccessHelp().words}. `),
+      openAccessButton()));
+  }
+  // Exam mode without access to every site leaves sites Gatekeeper doesn't know open: said plainly (QA round 3, N3).
+  for (const id of ["exam-open-today", "clock-today"]) { const x = document.getElementById(id); if (x) x.remove(); }
+  if (t.exam && !seeAll) {
+    const ask2 = el("button", { class: "link", type: "button" }, "Let Gatekeeper close them");
+    ask2.addEventListener("click", async () => { await askEverySite(); show(); });
+    $("rings").before(el("div", { class: "note", id: "exam-open-today" }, el("span", {}, "Sites Gatekeeper doesn't know stay open in this exam mode. "), ask2));
+  }
+  // The clock moved, or the computer slept: say that Gatekeeper is checking the time (QA round 3, first-run N1).
+  if (state.clock && state.clock.held) {
+    $("rings").before(el("div", { class: "note", id: "clock-today" }, el("span", {}, "Gatekeeper is checking the time with its server (your computer slept, or its clock moved). Until then, exam mode and changes waiting for the morning hold.")));
   }
 }
 

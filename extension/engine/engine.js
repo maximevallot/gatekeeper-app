@@ -33,6 +33,8 @@ export const DEFAULT_MINUTES = 15;
 export const DEFAULT_DAY_START = 4; // the day, and every budget, turns over at 4:00
 export const MAX_TICK_SECONDS = 5;
 export const MAX_JUMP_MS = 15 * 60e3; // a clock change bigger than this, between two reads, is checked before it counts
+export const MAX_DRIFT_MS = 2 * 60e3; // the clock running away from monotonic time by this much, in small steps, is checked too
+export const GAP_GRACE_MS = 20e3; // after sleep or a closed browser, the day takes the clock's word if the relay doesn't answer in this long
 export const UNDO_MS = 60e3; // a change on the rules page can be undone for this long, without the agent // one report never counts more than this, so a sleeping laptop costs nothing
 export const SORT_AFTER_SECONDS = 60; // an unknown site is sorted once it has been in front this long
 export const SORT_RETRY_MS = 3600e3; // after a failed sort, wait an hour before asking again
@@ -203,27 +205,57 @@ export function label(kind) {
 // ---------- the day ----------
 
 /** Read the clock through the floor, end the day if its moment has come, and apply what waited for it. */
-export function rollover(state, now) {
+export function rollover(state, now, { mono, run } = {}) {
   let s = state;
   const c = s.clock || { floor: 0 };
   const n = (Number(now) || 0) + (c.offset || 0);
-  let t;
-  if (c.guard && c.floor && Math.abs(n - c.floor) > MAX_JUMP_MS) {
-    // The clock jumped (QA round 2, C1): time stands still until the hands have checked it (confirmTime).
-    // A forward jump would end exam mode and the day; a backward one is held too, so the check can undo a
-    // wrong forward jump from before.
-    t = c.floor;
-    if (!c.held) s = { ...s, clock: { ...c, held: { seen: n } } };
+  let floor = c.floor || 0, strict = c.strict ?? floor, held = c.held || null, drift = c.drift || 0, last = c.last || null;
+  if (!c.guard) {
+    floor = strict = Math.max(n, floor);
+  } else if (mono === undefined) {
+    // A read between ticks (a page, an alarm): time moves only a little here; anything bigger waits for the tick.
+    if (!held && n > floor && n - floor <= MAX_JUMP_MS) floor = strict = n;
+    else if (!held && floor && Math.abs(n - floor) > MAX_JUMP_MS) held = { kind: "jump", seen: n };
   } else {
-    t = Math.max(n, c.floor || 0);
-    if (c.floor !== t || c.held) { const { held, ...rest } = c; s = { ...s, clock: { ...rest, floor: t } }; }
+    // The worker's tick: wall time is compared with monotonic time (QA round 3, gate N2 and first-run N1).
+    const dm = last && last.run === run && mono >= last.mono ? mono - last.mono : null; // null: the worker restarted
+    const dw = last ? n - last.wall : n - floor;
+    const bigGap = dm === null ? floor > 0 && n - floor > MAX_JUMP_MS : dw - dm > MAX_JUMP_MS;
+    const gap = bigGap || (!!held && held.kind !== "drift");
+    if (gap) {
+      if (held && held.kind === "drift") held = null; // a night asleep after small steps still counts for the day
+      // The browser was closed or the computer slept (the clock doesn't run in sleep), or the clock was moved in one
+      // go. For the day it is real time once the relay hasn't answered for GAP_GRACE_MS; exam mode and waiting
+      // loosenings keep to monotonic time until the relay's time comes (strict).
+      // A worker that just started means the browser wasn't running: that counts at once.
+      if (!held || held.kind === "jump") held = { kind: "gap", seen: n, mono, run, closed: dm === null };
+      if (held.closed || held.run !== run || mono - held.mono >= GAP_GRACE_MS) floor = Math.max(floor, n);
+      strict += Math.max(0, Math.min(dm ?? 0, MAX_JUMP_MS));
+    } else {
+      // Running: small steps add up (14 minutes at a time is still a moved clock).
+      drift += dw - dm;
+      if (!held && Math.abs(drift) > MAX_DRIFT_MS) held = { kind: "drift", seen: n, mono, run };
+      if (held) { floor += Math.max(0, dm); strict += Math.max(0, dm); }
+      else floor = strict = Math.max(floor, n);
+    }
+    last = { wall: n, mono, run };
+  }
+  strict = Math.min(Math.max(strict, c.strict ?? 0), floor);
+  const t = floor;
+  const same = c.floor === floor && (c.strict ?? c.floor) === strict && c.held === held && (c.drift || 0) === drift && c.last === last;
+  if (!same) {
+    const next = { ...c, floor, strict, drift, last };
+    if (held) next.held = held; else delete next.held;
+    if (!c.guard) { delete next.strict; delete next.drift; delete next.last; }
+    s = { ...s, clock: next };
   }
   const ending = !s.usage.endsAt || t >= s.usage.endsAt;
   // The day that ends goes into the week's history, under the rules it was lived by.
   if (ending && s.usage.day) s = { ...s, history: [...(s.history || []).filter((h) => h.day !== s.usage.day), daySummary(s)].slice(-HISTORY_DAYS) };
   // A loosening applies in the morning only once the agent said yes (or with Claude help off, the morning
   // alone). What the agent approved earlier applies even if a later request is still waiting for its yes.
-  if (s.pending && t >= s.pending.from) {
+  // A loosening waiting for the morning waits for time that is sure (strict), not for a moved clock.
+  if (s.pending && strictNow(s) >= s.pending.from) {
     if (s.pending.ok !== false) s = { ...s, rules: s.pending.rules, pending: null };
     else if (s.pending.approved) s = { ...s, rules: s.pending.approved, pending: { ...s.pending, approved: null, from: s.usage.endsAt > t ? s.usage.endsAt : nextDayStart(t, s.rules.dayStart) } };
   }
@@ -242,16 +274,24 @@ export function rollover(state, now) {
  * when the answer came. Gatekeeper then reads time as the computer's clock plus the difference, so a clock set
  * forward or back counts for nothing, and real time that passed (a night asleep) counts in full.
  */
-export function confirmTime(state, { server, local }) {
+export function confirmTime(state, { server, local, mono, run }) {
   const c = state.clock || { floor: 0 };
   if (!Number.isFinite(server) || !Number.isFinite(local)) return state;
   const offset = Math.abs(server - local) > 2 * 60e3 ? Math.round(server - local) : 0;
-  const { held, ...rest } = c;
+  const { held, ...rest0 } = c;
   const floor = Math.round(server);
+  // From the relay's time on, wall and monotonic time are compared afresh.
+  const rest = { ...rest0, strict: floor, drift: 0, last: mono === undefined ? null : { wall: floor, mono, run } };
   // Moments counted up to a wrong time ahead come back to the true one, so time is counted again from now.
   const u = state.usage || {};
   const upTo = Object.fromEntries(Object.entries(u.upTo || {}).map(([b, m]) => [b, Math.min(m, floor)]));
   return { ...state, usage: { ...u, upTo, passUpTo: Math.min(u.passUpTo || 0, floor) }, clock: { ...rest, offset, floor, checkedAt: floor } };
+}
+
+/** Time that is sure: the relay's, or the clock as far as monotonic time agrees. Exam mode keeps to it. */
+export function strictNow(state) {
+  const c = state.clock || {};
+  return c.strict ?? c.floor ?? 0;
 }
 
 /** Whether the clock jumped and the hands should check the time. */
@@ -438,6 +478,10 @@ function passFor(s, domain, ladder) {
  * of its own still shares Video's three passes and Video's cooldown.
  */
 function ladderKey(s, url) {
+  // A catalog site keeps its catalog kind's ladder wherever the user moved it (QA round 3, N4).
+  const host = hostOf(url);
+  const c = host && catalogMatch(host);
+  if (c) return c.kind;
   const k = kindOf(s, url);
   return KINDS[k] ? k : "d:" + baseDomain(siteDomain(url) || "");
 }
@@ -523,13 +567,14 @@ export function decide(state, { url, title = "", now }) {
   const budget = rule.minutes * 60;
   const used = usedSeconds(s, kind);
   const e = entryFor(s, host);
+  const ladder = ladderKey(s, url);
   const base = {
-    kind, bucket: kind, ladder: kind, passDomain: e && e.domain, label: label(kind), watched: true, title,
+    kind, bucket: kind, ladder, passDomain: e && e.domain, label: label(kind), watched: true, title,
     usedMinutes: Math.floor(used / 60), budgetMinutes: rule.minutes,
     leftMinutes: Math.max(0, Math.ceil((budget - used) / 60)),
     reopensAt: s.usage.endsAt,
   };
-  const pass = passFor(s, e && e.domain, kind);
+  const pass = passFor(s, e && e.domain, ladder);
   if (pass) return { ...base, verdict: "allow", pass: true, leftMinutes: Math.ceil(pass.secondsLeft / 60) };
   if (rule.minutes === 0) return { ...base, verdict: "block" };
   if (used >= budget) return { ...base, verdict: "gate" };
@@ -541,8 +586,8 @@ export function decide(state, { url, title = "", now }) {
  * there, and the pages playing sound in any window. Each watched kind on screen or playing counts once.
  * Every tick uses up the passes, whatever is in front.
  */
-export function tick(state, { url, title = "", focused, active, seconds, now, audible = [] }) {
-  let s = rollover(state, now);
+export function tick(state, { url, title = "", focused, active, seconds, now, audible = [], mono, run }) {
+  let s = rollover(state, now, { mono, run });
   const t = s.clock.floor;
   const add = clamp(seconds);
   // The report is a span of real time (one-per-person design, step 1): [t - add, t], or, while the clock stands
@@ -848,7 +893,9 @@ export function cleanRules(rules, fallback) {
   const ds = Number(r.dayStart);
   const dayStart = Number.isInteger(ds) && ds >= 0 && ds <= 23 ? ds : fallback.dayStart;
   const e = r.exam;
-  const exam = e && Number.isFinite(Number(e.until)) ? { until: Number(e.until), goal: String(e.goal || "").replace(/\s+/g, " ").trim().slice(0, 200), ...(Number.isFinite(Number(e.from)) && e.from ? { from: Number(e.from) } : {}) } : null;
+  const exam = e && Number.isFinite(Number(e.until)) ? { until: Number(e.until), goal: String(e.goal || "").replace(/\s+/g, " ").trim().slice(0, 200),
+    ...(Number.isFinite(Number(e.from)) && e.from ? { from: Number(e.from) } : {}),
+    at: Number.isFinite(Number(e.at)) && e.at ? Math.min(Number(e.at), Number(e.until)) : Number(e.until) } : null;
   return { kinds, sites, siteLimits, videos: cleanVideos(r.videos), dayStart, exam };
 }
 
@@ -912,9 +959,10 @@ export function tighten(cur, next, state) {
   const youtube = kindUnder(cur, "youtube.com"); // the kind YouTube's own pages count against today
   const videos = tightenVideos(cur.videos || [], next.videos || [], { watched: !!(youtube && kinds[youtube]) });
   // Exam mode in force can only be extended now; ending or shortening it waits (the sentence ends it at once).
-  const t = (state.clock && state.clock.floor) || 0;
+  const t = strictNow(state);
   const a = cur.exam && cur.exam.until > t ? cur.exam : null, b = next.exam || null;
-  const exam = a ? (b && b.until >= a.until ? b : a) : b;
+  // The exam's own time in force never moves earlier: ending at once depends on it.
+  const exam = a ? (b && b.until >= a.until ? { ...b, at: Math.max(a.at || a.until, b.at || b.until) } : a) : b;
   return { ...next, kinds, sites, siteLimits, videos, dayStart: cur.dayStart, exam };
 }
 
@@ -1207,6 +1255,8 @@ export function chatRequest(state, { message, history = [], now }) {
       // Exam mode and the time of day, so "until Wednesday 8:30" and "end exam mode" can be understood.
       exam: examForRelay(s),
       now: localIso(s.clock.floor),
+      // A no holds every loosening until the morning: the relay then drops loosening ops and says so (QA round 3, N1).
+      loosenLocked: ((s.denied || {}).rules || 0) > s.clock.floor,
     },
   };
 }
@@ -1250,7 +1300,7 @@ export function chatPreview(state, answer, now) {
   const nowChanges = fresh(r.now, before.now), later = fresh(r.later, before.later).map((c) => ({ ...c, agent: !!r.needsOk }));
   // "End exam mode early" is shown on the card as a loosening for the agent, never as done.
   const end = examEnd && examOn(s) ? { text: "End exam mode early", agent: true } : null;
-  return { reply, question, rules, now: nowChanges, later: end ? [...later, end] : later, from: later.length || end ? r.from : null,
+  return { reply, question, rules, now: nowChanges, later: end ? [...later, end] : later, from: later.length || end ? r.from : null, refused: r.refused,
     skipped: skipped.length, needsAccess, examEnd: !!end };
 }
 
@@ -1262,17 +1312,20 @@ export const MAX_EXAM_DAYS = 14;
 
 export function examOn(state) {
   const e = state.rules && state.rules.exam;
-  return !!e && e.until > ((state.clock && state.clock.floor) || 0);
+  return !!e && e.until > strictNow(state);
 }
 
 /** Start exam mode, or move its end later (the later end wins). Applied through proposeRules: a tightening. */
-export function startExam(state, { until, goal, source = "extension" }, now) {
+export function startExam(state, { until, goal, source = "extension", at }, now) {
   const s = rollover(state, now);
   const t = s.clock.floor;
   const end = Math.min(Number(until), t + MAX_EXAM_DAYS * 86400e3);
   if (!Number.isFinite(end) || end <= t) return { state: s, refused: "bad_until" };
   const cur = examOn(s) ? s.rules.exam : null;
-  const exam = { until: Math.max(end, cur ? cur.until : 0), goal: String(goal || (cur && cur.goal) || "").replace(/\s+/g, " ").trim().slice(0, 200), from: cur && cur.from ? cur.from : t };
+  // The exam's own time is fixed when exam mode starts (QA round 3, N1): the offered event's start, or the time
+  // given, else its end. Nothing added to the calendar later can move it.
+  const own = Number.isFinite(Number(at)) && Number(at) > 0 ? Math.min(Number(at), end) : end;
+  const exam = { until: Math.max(end, cur ? cur.until : 0), goal: String(goal || (cur && cur.goal) || "").replace(/\s+/g, " ").trim().slice(0, 200), from: cur && cur.from ? cur.from : t, at: cur && cur.at ? cur.at : own };
   const r = proposeRules(s, { ...wantedRules(s), exam }, now, { source });
   return { state: { ...r.state, log: logEvent(r.state, "exam.start", { until: exam.until, goal: exam.goal, source }) }, exam };
 }
@@ -1298,11 +1351,11 @@ export function endExam(state, now) {
  * and before now. Only then can the agent's yes end exam mode at once.
  */
 export function examAt(state) {
-  if (!examOn(state) || !state.calendar) return null;
-  const t = state.clock.floor, e = state.rules.exam;
-  const from = (e.from || t) - 3600e3; // an exam that began just before exam mode was started counts
-  const begun = state.calendar.events.filter((x) => EXAM_WORDS.test(x.title) && x.start >= from && x.start <= t && x.start < e.until);
-  return begun.length ? begun[begun.length - 1].start : null;
+  if (!examOn(state)) return null;
+  const e = state.rules.exam;
+  // The exam exam mode was started for, fixed then (QA round 3, N1): never a quiz added to the calendar since.
+  const at = e.at || e.until;
+  return at <= strictNow(state) ? at : null;
 }
 
 /** Exam mode ends at `at` (now, or the next morning), in the rules in force and in what waits. */
@@ -1473,7 +1526,9 @@ export function recordChatAnswer(state, answer, preview, now) {
     view: { now: preview.now.map((c) => c.text), later: preview.later.map((c) => ({ text: c.text, agent: !!c.agent })), from: preview.from, needsAccess: preview.needsAccess, skipped: preview.skipped },
     at: s.clock ? s.clock.floor : now,
   } : null;
-  if (!preview.question && !changes) s = addTurn(s, "gatekeeper", "That changes nothing in your rules.", now);
+  // After a no today, the reply says why nothing loosens; the generic line would contradict it (QA round 3, chat N1).
+  const locked = ((s.denied || {}).rules || 0) > ((s.clock && s.clock.floor) || 0) || preview.refused === "asked_today";
+  if (!preview.question && !changes && !locked) s = addTurn(s, "gatekeeper", "That changes nothing in your rules.", now);
   return { ...s, thread: { ...s.thread, card } };
 }
 
@@ -1496,7 +1551,7 @@ export function applyCard(state, now) {
   if (p.examEnd) {
     exam = endExam(s, now);
     s = exam.state;
-    text = exam.needsOk ? "To end exam mode early, tell me why. If the exam is over, it ends now; otherwise tomorrow morning."
+    text = exam.needsOk ? "To end exam mode early, tell me why. Once your exam's time has come, it can end now; before that, tomorrow morning at the earliest."
       : { ends_anyway: `Exam mode ends at ${hhmm(exam.until)} anyway.`, help_off: `With Claude help off, exam mode runs to its end at ${hhmm(exam.until)}.`,
           asked_today: "I said no to ending it today. You can ask again tomorrow.", not_on: "Exam mode is already off." }[exam.refused] || "Nothing changed.";
   } else if (r.refused === "asked_today") text = `I said no to a loosening today${r.now.length ? "; the stricter part applies now" : ""}. You can ask again tomorrow.`;
