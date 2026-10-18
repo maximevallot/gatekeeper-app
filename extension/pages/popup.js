@@ -1,7 +1,7 @@
 // Today, in the toolbar popup: a ring per watched kind (minutes left, or a lock when closed), the goal, and
 // the way to change something.
 import { todaySummary } from "../engine/engine.js";
-import { ask, el, svg, lockIcon, chatIcon, clock, checkWorker } from "./common.js";
+import { ask, el, svg, lockIcon, chatIcon, clock, checkWorker, examForm } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 const C = 2 * Math.PI * 40;
@@ -43,6 +43,7 @@ async function show() {
     : [el("p", { class: "lead", style: "grid-column: 1 / -1" }, "Nothing is watched yet.")]));
   $("goal").textContent = t.goal;
   $("goal-card").classList.toggle("hidden", !t.goal);
+  $("exam-box").classList.toggle("hidden", !!t.exam);
   if (t.exam) { $("mode").textContent = `Exam mode until ${clock(t.exam.until)}`; $("mode").className = "pill closed"; }
   else if (blind && blind.length) { $("mode").textContent = "Check site access"; $("mode").className = "pill warn"; }
   else if (t.waiting) { $("mode").textContent = "Change tomorrow"; $("mode").className = "pill warn"; }
@@ -67,6 +68,15 @@ function showWatch(t) {
   $("change").replaceChildren("Set limits now");
   $("change").onclick = async (e) => { e.preventDefault(); openTab("welcome.html?after=watch"); };
 }
+
+// Start exam mode from Today: it applies at once, and the rings lock.
+$("exam-start").addEventListener("click", () => {
+  $("exam-box").replaceChildren(examForm((r) => {
+    if (r.ok) show().then(() => $("exam-box").classList.add("hidden"));
+    else $("exam-box").append(el("div", { class: "small muted" }, r.refused === "bad_until" ? "Pick a time ahead." : "Not saved."));
+  }));
+  $("exam-until").focus();
+});
 
 $("all-rules").addEventListener("click", (e) => { e.preventDefault(); openTab("rules.html"); });
 $("your-week").addEventListener("click", (e) => { e.preventDefault(); openTab("week.html"); });

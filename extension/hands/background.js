@@ -297,6 +297,12 @@ const handlers = {
     return preview.error ? { failed: preview.error } : preview;
   },
   // The watch week: start it from the welcome tab, end it early with one tap, and mark its summary seen.
+  // Start exam mode, or move its end later: a tightening, at once.
+  async startExam({ until, goal }) {
+    const out = await update((s) => engine.startExam(s, { until, goal }, Date.now()));
+    macSync(true);
+    return { ok: !out.refused, refused: out.refused, exam: out.exam };
+  },
   // Ending exam mode early: a request to the agent, or a reason why nothing is asked (decision 3).
   async endExam() {
     const out = await update((s) => engine.endExam(s, Date.now()));

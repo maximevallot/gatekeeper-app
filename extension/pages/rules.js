@@ -5,7 +5,7 @@ import { DEFAULT_MINUTES, label, examOn } from "../engine/engine.js";
 import { videoName } from "../engine/videos.js";
 import {
   ask, el, when, clock, stepper, checkWorker, warnings, whatsSentToggle, chatIcon, privateToggle, extensionsPage,
-  getAppearance, setAppearance,
+  getAppearance, setAppearance, examForm,
 } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
@@ -207,6 +207,7 @@ function renderExam() {
   const s = got.state;
   const on = examOn(s);
   $("exam-row").classList.toggle("hidden", !on);
+  $("exam-start-row").classList.toggle("hidden", on);
   if (!on) return;
   $("exam-title").textContent = `Exam mode until ${when(s.rules.exam.until)}`;
   $("exam-goal").textContent = s.rules.exam.goal || "Every kind of site is closed until then.";
@@ -214,6 +215,15 @@ function renderExam() {
   if (location.hash === "#exam" && !renderExam.opened) { renderExam.opened = true; $("exam-end-open").focus(); }
 }
 window.addEventListener("hashchange", () => { renderExam.opened = false; if (got) renderExam(); });
+
+$("exam-start").addEventListener("click", () => {
+  $("exam-start-box").replaceChildren(examForm(async (r) => {
+    saved(r.ok ? `Exam mode is on until ${when(r.exam.until)}` : r.refused === "bad_until" ? "Pick a time ahead" : "Not saved");
+    $("exam-start-box").replaceChildren();
+    await load();
+  }));
+  $("exam-until").focus();
+});
 
 // Ending early asks the agent (decision of 2026-10-17): a yes ends it at once if the exam is over, else the
 // next morning. With Claude help off it runs to its set end.

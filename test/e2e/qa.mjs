@@ -93,6 +93,20 @@ try {
   await p.evaluate(`document.querySelector('#appearance [data-choice=dark]').click()`);
   await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(800);
   check("Dark, once chosen, applies to the other pages", (await p.evaluate(`document.documentElement.dataset.theme`)) === "dark");
+
+  // Start exam mode from Today (one-model plan, gap 2): it applies at once, and the rules page shows it.
+  await p.send("Page.navigate", { url: base + "/pages/popup.html" }); await sleep(800);
+  await p.evaluate(`document.getElementById('exam-start').click()`); await sleep(300);
+  const until = Date.now() + 2 * 86400e3;
+  await p.evaluate(`(() => { const d = new Date(${until}), z = (n) => String(n).padStart(2, '0');
+    document.getElementById('exam-until').value = d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + 'T' + z(d.getHours()) + ':' + z(d.getMinutes());
+    document.getElementById('exam-for').value = '15.425 midterm'; document.getElementById('exam-start-form').requestSubmit(); })()`);
+  await sleep(1500);
+  const st = await sw.evaluate(`chrome.storage.local.get('state').then(r => r.state.rules.exam)`);
+  check("Start exam mode on Today turns it on at once", st && st.goal === "15.425 midterm" && Math.abs(st.until - until) < 120e3, st);
+  check("Today shows it", /Exam mode until/.test(await p.evaluate(`document.getElementById('mode').textContent`)));
+  await p.send("Page.navigate", { url: base + "/pages/rules.html" }); await sleep(1000);
+  check("the rules page shows it, with End early", !(await p.evaluate(`document.getElementById('exam-row').classList.contains('hidden')`)) && (await p.evaluate(`document.getElementById('exam-start-row').classList.contains('hidden')`)));
 } catch (e) {
   console.log("FAIL", e.message); failures++;
 }

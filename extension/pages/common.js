@@ -164,3 +164,31 @@ export function setAppearance(choice) {
   const dark = choice === "dark" || (choice === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
+
+/** "2026-10-22T08:30", the local value a datetime-local input takes. */
+function localInput(t) {
+  const d = new Date(t), p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * Start exam mode: until when, and for what. Starting or extending is a tightening, so it applies at once.
+ * `done(result)` is called after the background answers.
+ */
+export function examForm(done) {
+  const soon = new Date(Date.now() + 3 * 3600e3);
+  soon.setMinutes(soon.getMinutes() < 30 ? 30 : 60, 0, 0);
+  const until = el("input", { class: "field", type: "datetime-local", id: "exam-until", value: localInput(soon), min: localInput(Date.now()), "aria-label": "Exam mode until" });
+  const goal = el("input", { class: "field", id: "exam-for", maxlength: "200", placeholder: "For: 15.425 midterm", autocomplete: "off", "aria-label": "What it's for" });
+  const go = el("button", { class: "btn", type: "submit", id: "exam-go" }, "Start");
+  const form = el("form", { class: "section", id: "exam-start-form", style: "gap: 8px" },
+    el("div", { class: "small muted" }, "Every kind of site closes until then. Ending it early asks Gatekeeper."),
+    until, goal, go);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const t = new Date(until.value).getTime();
+    const r = await ask("startExam", { until: t, goal: goal.value }).catch(() => ({ refused: "unreachable" }));
+    done(r);
+  });
+  return form;
+}
