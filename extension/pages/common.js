@@ -2,6 +2,7 @@
 
 import { PROTOCOL } from "../protocol.js";
 import { WHATS_SENT, SENT_TO } from "../engine/engine.js";
+import { KINDS } from "../engine/catalog.js";
 
 export function ask(type, body = {}) {
   return new Promise((resolve, reject) =>
@@ -215,6 +216,28 @@ export async function askEverySite() {
   const all = { origins: ["*://*/*"] };
   if (await chrome.permissions.contains(all).catch(() => false)) return true;
   return chrome.permissions.request(all).catch(() => false);
+}
+
+/**
+ * Sites Gatekeeper doesn't know: it can see them only with access to every site. Asked for on its own switch
+ * (the rules page, and an offer on the welcome's done screen), never inside another click, so the browser's
+ * prompt comes only after this line (tester run, 2026-10-19: without exam mode nobody was ever asked).
+ */
+export const KNOWN_SITES = Object.values(KINDS).reduce((n, k) => n + k.domains.length, 0);
+export const NEW_SITES_LINE = `Gatekeeper knows ${KNOWN_SITES} distracting sites. To notice others and count them in the right kind, your browser will ask to let it see all sites. It reads only site names, never page content.`;
+export const NEW_SITES_ON = "On: a site Gatekeeper doesn't know is sorted after a minute in front, and counts in its kind.";
+
+/** Turns on noticing new sites: the browser's prompt (unless access is already given), then sorting. True if on. */
+export async function turnOnNewSites() {
+  if (!(await askEverySite())) return false;
+  const r = await ask("consent", { sorting: true }).catch(() => null);
+  return !!(r && r.sorting);
+}
+
+/** Off: sorting stops, and the access goes back, unless exam mode still needs it for the sites it closes. */
+export async function turnOffNewSites({ exam = false } = {}) {
+  await ask("consent", { sorting: false }).catch(() => null);
+  if (!exam) await chrome.permissions.remove({ origins: ["*://*/*"] }).catch(() => false);
 }
 
 /** Where a browser's own page for Gatekeeper's site access is, and its words for the switch (QA round 3, first-run N2). */

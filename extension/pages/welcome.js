@@ -1,6 +1,6 @@
 import { KINDS, KIND_ORDER } from "../engine/catalog.js";
 import { DEFAULT_MINUTES, minutesText, label, baseline } from "../engine/engine.js";
-import { ask, el, checkWorker, extensionsPage, privateToggle, stepper, whatsSentToggle } from "./common.js";
+import { ask, el, checkWorker, extensionsPage, privateToggle, stepper, whatsSentToggle, NEW_SITES_LINE, NEW_SITES_ON, turnOnNewSites } from "./common.js";
 
 // With Claude help off, nothing about the user leaves the browser. The one request that does go out is a bare
 // one for the time, to Gatekeeper's relay, when this computer's clock jumps (QA round 2, C1).
@@ -96,7 +96,23 @@ $("start").addEventListener("click", async () => {
   $("ask").classList.add("hidden");
   $("done").classList.remove("hidden");
   checkPrivate();
+  offerNewSites();
 });
+
+// With AI help on, the done screen offers to notice sites Gatekeeper doesn't know: its own click, after the line
+// that says what the browser will ask, never inside Start (tester run, 2026-10-19).
+async function offerNewSites() {
+  const { consent = {}, seeAll, state } = await ask("state").catch(() => ({}));
+  const show = !!(consent.help && consent.help.on) && !(seeAll && state && state.sorting);
+  $("new-sites-card").classList.toggle("hidden", !show);
+  $("new-sites-text").textContent = NEW_SITES_LINE;
+}
+$("new-sites-on").addEventListener("click", async () => {
+  const on = await turnOnNewSites();
+  $("new-sites-text").textContent = on ? NEW_SITES_ON : "Not turned on. You can turn it on later in your rules, under New distracting sites.";
+  $("new-sites-on").parentElement.classList.add("hidden");
+});
+$("new-sites-no").addEventListener("click", () => $("new-sites-card").classList.add("hidden"));
 
 // Where setup is, for the worker: turning on private windows reloads the extension and closes this tab, and the
 // worker then reopens it at this step (tester run, #3).
@@ -116,6 +132,7 @@ if (new URLSearchParams(location.search).get("step") === "done") {
     $("summary").textContent = Object.entries(state.rules.kinds).map(([k, v]) => `${label(k)}: ${minutesText(v.minutes)}`).join(". ") + (Object.keys(state.rules.kinds).length ? "." : "");
     $("done").classList.remove("hidden");
     checkPrivate();
+    offerNewSites();
   })();
 }
 

@@ -6,7 +6,7 @@ import { videoName } from "../engine/videos.js";
 import { calendarProblem, CALENDAR_HELP } from "../engine/calendar.js";
 import {
   ask, el, when, clock, stepper, checkWorker, warnings, whatsSentToggle, chatIcon, privateToggle, extensionsPage,
-  getAppearance, setAppearance, examForm,
+  getAppearance, setAppearance, examForm, NEW_SITES_LINE, NEW_SITES_ON, turnOnNewSites, turnOffNewSites,
 } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
@@ -221,8 +221,13 @@ function renderSettings() {
   $("help").checked = !!help.on;
   const outdated = help.outdated || (!help.on && Object.values(consent).some((c) => c && c.on));
   $("help-sub").textContent = help.on
-    ? (state.sorting ? "On: gate answers, rule changes by talking, sorting new sites." : "On: gate answers and rule changes by talking. Sorting new sites needs your browser to let Gatekeeper see every site.")
+    ? "On: gate answers and rule changes by talking."
     : outdated ? "What's sent changed since you last agreed. Turn it on to agree to the list below." : "Off: nothing is sent.";
+  // New distracting sites: sorting them sends their name, so it comes with AI help (tester run, 2026-10-19).
+  const newOn = !!(help.on && state.sorting && got.seeAll);
+  $("new-sites").checked = newOn;
+  $("new-sites").disabled = !help.on;
+  $("new-sites-sub").textContent = !help.on ? "Needs AI help, above." : newOn ? NEW_SITES_ON : NEW_SITES_LINE;
   $("private-pill").textContent = incognito ? "Covered" : "Not covered";
   $("private-pill").className = incognito ? "pill ok" : "pill warn";
   $("private-sub").textContent = incognito ? "Gatekeeper works in private windows too." : `Turn on "${privateToggle()}" for Gatekeeper in ${extensionsPage()}.`;
@@ -242,6 +247,17 @@ $("help").addEventListener("change", () => {
     catch { saved("Not saved: Gatekeeper's background didn't answer"); }
     await load();
   });
+});
+
+$("new-sites").addEventListener("change", async () => {
+  if ($("new-sites").checked) {
+    const on = await turnOnNewSites();
+    saved(on ? "New distracting sites: on" : "Not turned on: your browser didn't give access");
+  } else {
+    await turnOffNewSites({ exam: examOn(got.state) });
+    saved("New distracting sites: off");
+  }
+  await load();
 });
 
 $("goal-edit").addEventListener("click", () => { $("goal-form").classList.toggle("hidden"); $("goal").focus(); });

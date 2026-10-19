@@ -55,6 +55,7 @@ try {
   await sleep(1000);
   check("H5: after Start, the welcome tab has a private-windows step with the exact toggle", /Allow in Private/.test(await p.evaluate(`document.getElementById('private-text').textContent`)));
   check("M3: with Claude off, the done panel says nothing leaves the browser", /Nothing leaves this browser/.test(await p.evaluate(`document.getElementById('done-privacy').textContent`)));
+  check("with AI help off, the done screen doesn't offer to catch new sites", await p.evaluate(`document.getElementById('new-sites-card').classList.contains('hidden')`));
   const sw = await connect((t) => t.type === "service_worker");
   const base = (await sw.evaluate(`chrome.runtime.getURL("")`)).replace(/\/$/, "");
 
@@ -164,6 +165,15 @@ try {
   const back = await connect((t) => t.type === "page" && t.url.includes("/pages/welcome.html?step=done"));
   await sleep(1200);
   check("tester #3: after the reload, the welcome comes back at the done screen", !(await back.evaluate(`document.getElementById('done').classList.contains('hidden')`)) && /You're set/.test(await back.evaluate(`document.getElementById('done-title').textContent`)));
+
+  // Tester run, 2026-10-19: with AI help on and no access to every site, the done screen offers to catch new sites,
+  // with the line that says what the browser will ask, before any prompt.
+  await back.evaluate(`chrome.runtime.sendMessage({ type: "consent", help: true })`); await sleep(500);
+  await back.send("Page.reload"); await sleep(1500);
+  check("with AI help on, the done screen offers to catch new sites and says what the browser will ask",
+    !(await back.evaluate(`document.getElementById('new-sites-card').classList.contains('hidden')`)) && /knows \d+ distracting sites.*ask to let it see all sites/.test(await back.evaluate(`document.getElementById('new-sites-text').textContent`)));
+  await back.evaluate(`document.getElementById('new-sites-no').click()`); await sleep(200);
+  check("Not now hides it", await back.evaluate(`document.getElementById('new-sites-card').classList.contains('hidden')`));
 } catch (e) {
   console.log("FAIL", e.message); failures++;
 }

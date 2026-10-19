@@ -134,6 +134,17 @@ try {
   await p.send("Page.reload"); await sleep(1000);
   s = await st();
   check("and turning it back on does too", JSON.stringify(await switches()) === "[true,false]" && s.talk === true && s.sorting === true, await switches());
+  // New distracting sites: its own switch, on with AI help and access to every site, and it survives a reload.
+  const newSites = () => p.evaluate(`[document.getElementById('new-sites').checked, document.getElementById('new-sites').disabled, document.getElementById('new-sites-sub').textContent]`);
+  check("New distracting sites shows on", (await newSites())[0] === true && /^On: /.test((await newSites())[2]), await newSites());
+  await p.evaluate(`document.getElementById('new-sites').click()`); await sleep(800);
+  await p.send("Page.reload"); await sleep(1000);
+  s = await st();
+  check("turning it off stops sorting and survives a reload, AI help stays on", (await newSites())[0] === false && s.sorting === false && s.talk === true && /knows \d+ distracting sites/.test((await newSites())[2]), { sw: await newSites(), sorting: s.sorting });
+  await p.evaluate(`document.getElementById('new-sites').click()`); await sleep(800);
+  await p.send("Page.reload"); await sleep(1000);
+  s = await st();
+  check("and back on", (await newSites())[0] === true && s.sorting === true, { sw: await newSites(), sorting: s.sorting });
 
   // 2. Sorting: a minute on the unknown game.
   await p.send("Page.navigate", { url: GAME });
