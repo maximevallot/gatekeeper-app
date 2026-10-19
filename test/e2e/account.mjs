@@ -102,19 +102,21 @@ try {
   // A: finishing the welcome makes the account.
   const A = await startBrowser("a", PORT_A, RELAY);
   check("the welcome says plainly that finishing makes an account", /Finishing makes your Gatekeeper account/.test(await A.p.evaluate(`document.querySelector('.account-line').textContent`)));
-  await A.msg("setup", { kinds: { games: 20, video: 30 }, goal: "Finish chapter 3" });
-  await A.msg("consent", { help: true });
+  // Through the welcome itself: Games and Video at 20 minutes, AI help on, Start.
+  await A.p.evaluate(`document.querySelector('.kind[data-kind=games]').click(); document.querySelector('.kind[data-kind=video]').click();
+    document.querySelector('#minutes [data-step="1"]').click(); document.getElementById('goal').value = 'Finish chapter 3'; document.getElementById('help').checked = true;
+    document.getElementById('start').click();`);
+  await sleep(4000);
   let a = await A.st();
   check("A has an account after the welcome", !!(a.account && a.account.token && a.account.accountId), a.account);
   check("the state sent never holds the token", !JSON.stringify(a.state).includes(a.account.token));
   check("A's install number is the account's ID", a.state.installId === a.account.accountId, { installId: a.state.installId });
   await A.msg("propose", { rules: { ...a.state.rules, sites: { "play.localhost": "games" } } });
 
-  // A shows a code on the rules page.
-  await A.p.send("Page.navigate", { url: A.base + "/pages/rules.html" }); await sleep(1500);
-  await A.p.evaluate(`document.getElementById('add-device').click()`); await sleep(1500);
-  const code = (await A.p.evaluate(`document.getElementById('device-code').textContent`)).trim();
-  check("Add a device shows a 6-digit code", /^\d{6}$/.test(code), code);
+  // Maxime's 0.3 test: the welcome's done screen shows a code at once, with where to type it.
+  const code = (await A.p.evaluate(`(document.getElementById('device-code-shown') || {}).textContent || ''`)).trim();
+  check("the done screen shows a code at once: Add your other devices", /^\d{6}$/.test(code) && !(await A.p.evaluate(`document.getElementById('add-devices').classList.contains('hidden')`))
+    && /Already use Gatekeeper/.test(await A.p.evaluate(`document.getElementById('add-devices').textContent`)), code);
 
   // B: "Already use Gatekeeper?" on its welcome.
   const B = await startBrowser("b", PORT_B, RELAY);
@@ -182,9 +184,11 @@ try {
   const C = await startBrowser("c", PORT_C, RELAY);
   await C.msg("setup", { kinds: { games: 0, social: 30 }, goal: "Safari's own" });
   await sleep(1500);
-  await A.p.send("Page.navigate", { url: A.base + "/pages/rules.html" }); await sleep(1500);
-  await A.p.evaluate(`document.getElementById('add-device').click()`); await sleep(1500);
-  const code2 = (await A.p.evaluate(`document.getElementById('device-code').textContent`)).trim();
+  // Today's "Add a device" shows a code right there.
+  await A.p.send("Page.navigate", { url: A.base + "/pages/popup.html" }); await sleep(1500);
+  await A.p.evaluate(`document.getElementById('add-device-link').click()`); await sleep(1500);
+  const code2 = (await A.p.evaluate(`(document.getElementById('device-code-shown') || {}).textContent || ''`)).trim();
+  check("Today's Add a device shows a code", /^\d{6}$/.test(code2), code2);
   await C.p.send("Page.navigate", { url: C.base + "/pages/rules.html" }); await sleep(1500);
   await C.p.evaluate(`document.getElementById('account-join-code').value = ${JSON.stringify(code2)}; document.getElementById('account-join-form').requestSubmit();`);
   await sleep(3000);

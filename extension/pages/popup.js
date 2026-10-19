@@ -1,7 +1,7 @@
 // Today, in the toolbar popup: a ring per watched kind (minutes left, or a lock when closed), the goal, and
 // the way to change something.
 import { todaySummary } from "../engine/engine.js";
-import { ask, el, svg, lockIcon, chatIcon, clock, checkWorker, examForm, extensionsPage, askEverySite, siteAccessHelp, openAccessButton, EVERY_SITE_LINE } from "./common.js";
+import { ask, el, svg, lockIcon, chatIcon, clock, checkWorker, examForm, extensionsPage, askEverySite, siteAccessHelp, openAccessButton, EVERY_SITE_LINE, showDeviceCode } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
 const C = 2 * Math.PI * 40;
@@ -123,5 +123,7 @@ $("exam-start").addEventListener("click", () => {
 
 $("all-rules").addEventListener("click", (e) => { e.preventDefault(); openTab("rules.html"); });
 $("your-week").addEventListener("click", (e) => { e.preventDefault(); openTab("week.html"); });
+// Add a device, right here: a code to type on the other device (Maxime's 0.3 test).
+$("add-device-link").addEventListener("click", (e) => { e.preventDefault(); $("add-device-box").classList.remove("hidden"); showDeviceCode($("add-device-box")); });
 checkWorker();
 show();

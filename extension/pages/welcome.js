@@ -1,6 +1,6 @@
 import { KINDS, KIND_ORDER } from "../engine/catalog.js";
 import { DEFAULT_MINUTES, minutesText, label, baseline } from "../engine/engine.js";
-import { ask, el, checkWorker, extensionsPage, privateToggle, stepper, whatsSentToggle } from "./common.js";
+import { ask, el, checkWorker, extensionsPage, privateToggle, stepper, whatsSentToggle, showDeviceCode } from "./common.js";
 
 // One Gatekeeper per person (0.3.0): finishing the welcome makes the account, and the page says so plainly.
 const ACCOUNT_LINE = "Finishing makes your Gatekeeper account on Gatekeeper's server: your rules, your goal, today's minutes per kind, exam mode and your talk with Gatekeeper are kept there, so your other devices can join and follow the same rules. Never the pages you visit. You can leave or delete it in your rules.";
@@ -158,6 +158,18 @@ if (new URLSearchParams(location.search).get("step") === "done") {
     checkPrivate();
   })();
 }
+
+// The done screen shows a code at once, so another device can join without digging through the rules page
+// (Maxime's 0.3 test). Not after joining: that device already found its Gatekeeper.
+async function offerDevices() {
+  if (offerDevices.done) return;
+  offerDevices.done = true;
+  $("add-devices").classList.remove("hidden");
+  await showDeviceCode($("add-devices-code"));
+}
+new MutationObserver(() => {
+  if (!$("done").classList.contains("hidden") && $("done-title").textContent !== "You're in your Gatekeeper") offerDevices();
+}).observe($("done"), { attributes: true, attributeFilter: ["class"] });
 
 // Private windows: extensions are off there unless the user allows it, and every site would open.
 async function checkPrivate() {

@@ -6,7 +6,7 @@ import { videoName } from "../engine/videos.js";
 import { calendarProblem, CALENDAR_HELP } from "../engine/calendar.js";
 import {
   ask, el, when, clock, stepper, checkWorker, warnings, whatsSentToggle, chatIcon, privateToggle, extensionsPage,
-  getAppearance, setAppearance, examForm,
+  getAppearance, setAppearance, examForm, CODE_WHERE,
 } from "./common.js";
 
 const $ = (id) => document.getElementById(id);
@@ -459,7 +459,7 @@ $("add-device").addEventListener("click", async () => {
   const r = await ask("addDevice");
   if (r.error) { $("device-code-note").textContent = "Couldn't get a code: Gatekeeper's server can't be reached."; $("device-code-note").classList.remove("hidden"); return; }
   $("device-code").textContent = r.code;
-  $("device-code-note").textContent = `On your other device: Gatekeeper's welcome, or Your Gatekeeper › Join. Works once, until ${clock(r.expiresAt)}.`;
+  $("device-code-note").textContent = CODE_WHERE;
   $("device-code").classList.remove("hidden"); $("device-code-note").classList.remove("hidden");
 });
 $("account-join-form").addEventListener("submit", async (e) => {

@@ -79,6 +79,30 @@ export function openAccessButton() {
   return b;
 }
 
+/** Where the code is typed, said the same on the welcome, Today and the Mac app (Maxime's 0.3 test). */
+export const CODE_WHERE = "Type it on your other device: in Safari, Gatekeeper's welcome › Already use Gatekeeper?; in the Mac app, its first screen. It works once, for 10 minutes.";
+
+/**
+ * A fresh 6-digit code to add a device, shown in place, with where to type it and a link for a new one. `into` is
+ * the element it fills.
+ */
+export async function showDeviceCode(into) {
+  into.replaceChildren(el("div", { class: "small muted" }, "Getting a code…"));
+  const r = await ask("addDevice").catch(() => ({ error: "unreachable" }));
+  if (r.error) {
+    into.replaceChildren(el("div", { class: "small muted", id: "device-code-error" }, r.error === "no_account"
+      ? "Your Gatekeeper account isn't made yet. Once Gatekeeper's server can be reached, a code shows here."
+      : "Gatekeeper's server can't be reached right now, so there's no code yet. Try again in a moment."));
+    return null;
+  }
+  const again = el("button", { class: "link", type: "button", id: "device-code-new" }, "New code");
+  again.addEventListener("click", () => showDeviceCode(into));
+  into.replaceChildren(
+    el("div", { class: "code", id: "device-code-shown", style: "font-size: 28px; letter-spacing: 6px; font-weight: 700" }, r.code),
+    el("div", { class: "small muted" }, CODE_WHERE, " ", again));
+  return r.code;
+}
+
 /** The name of the switch that lets an extension run in private windows. */
 export function privateToggle() {
   return extensionsPage().startsWith("brave") ? "Allow in Private" : "Allow in Incognito";
