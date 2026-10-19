@@ -129,18 +129,17 @@ test("an approved change stays approved: a second loosening asks only about itse
   assert.equal(rollover(r2.state, TUE).rules.kinds.video.minutes, 45);
 });
 
-test("ending exam mode early: the agent decides; a yes ends it at once only once the exam's own time, fixed at the start, has come", () => {
+test("ending exam mode early: the agent decides, and its yes ends it at once (2026-10-19)", () => {
   const WED = at("2026-10-22T08:30:00-04:00");
   const s0 = startExam(setUp(), { until: WED, goal: "midterm" }, MON).state;
-  // QA round 2, C3: "it's over" two days before the exam. With no exam begun on the calendar, a "now" is the morning.
-  const early = applyLoosenAnswer(endExam(s0, MON).state, { answer: { ...yes, when: "now" }, message: "exam is over", now: MON });
-  assert.ok(examOn(early.state), "no exam has begun: not at once");
-  assert.equal(early.result.now, false);
+  // No exam's own time is needed any more: the yes itself ends it now, whatever `when` says.
+  const early = applyLoosenAnswer(endExam(s0, MON).state, { answer: yes, message: "it was a try-out, I have no exam", now: MON });
+  assert.ok(!examOn(early.state), "a yes ends it at once");
+  assert.equal(early.result.now, true);
   assert.equal(loosenRequest(endExam(s0, MON).state, { message: "exam is over", now: MON }).payload.exam.examAt, null);
-  // QA round 3, N1: a "Quiz" on the calendar during exam mode is not the exam; nothing on the calendar moves it.
+  // QA round 3, N1: a "Quiz" on the calendar during exam mode is still not taken as the exam's own time.
   const quiz = { ...s0, calendar: { url: "https://x.edu/cal.ics", events: [{ title: "Quiz 3, 15.401", start: MON - 60e3 }], fetchedAt: MON, error: null } };
   assert.equal(loosenRequest(endExam(quiz, MON).state, { message: "exam is over", now: MON }).payload.exam.examAt, null);
-  assert.ok(examOn(applyLoosenAnswer(endExam(quiz, MON).state, { answer: { ...yes, when: "now" }, now: MON }).state), "the quiz doesn't end it");
   // Exam mode started for the midterm at 20:00 tonight (its own time, fixed at the start), and it has begun.
   const EXAM = MON - 2 * 3600e3;
   const s = startExam(setUp(), { until: WED, goal: "midterm", at: EXAM }, EXAM - 3600e3).state;
@@ -149,13 +148,10 @@ test("ending exam mode early: the agent decides; a yes ends it at once only once
   assert.equal(e.needsOk, true);
   assert.ok(examOn(e.state), "not before the agent's yes");
   assert.equal(loosenRequest(e.state, { message: "The exam was moved to next month", now: MON }).payload.kind, "exam");
-  const y = applyLoosenAnswer(e.state, { answer: yes, now: MON }).state;
-  assert.ok(examOn(y), "still on tonight");
-  assert.ok(!examOn(rollover(y, TUE)), "over in the morning");
   const done = applyLoosenAnswer(e.state, { answer: { ...yes, when: "now" }, now: MON });
   assert.ok(!examOn(done.state), "the exam is over: it ends at once");
   assert.equal(done.result.now, true);
-  assert.ok(examOn(applyLoosenAnswer(e.state, { answer: { ...yes, when: "morning" }, now: MON }).state), "when: morning waits for the morning");
+  assert.ok(!examOn(applyLoosenAnswer(e.state, { answer: { ...yes, when: "morning" }, now: MON }).state), "an older relay's morning ends it at once too");
   const n = applyLoosenAnswer(e.state, { answer: no, now: MON }).state;
   assert.ok(examOn(rollover(n, TUE)));
   assert.equal(endExam(n, MON).refused, "asked_today");

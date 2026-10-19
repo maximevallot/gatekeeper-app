@@ -55,12 +55,12 @@ test("the Mac can only tighten: exam.end is refused", () => {
   }
 });
 
-test("ending exam mode early (decision 3): with Claude help off it runs to its end; ending before morning anyway asks nothing", () => {
+test("ending exam mode early (decision 3): with AI help off it runs to its end; one ending this afternoon can still be asked about", () => {
   const s = startExam(setUp({}), { until: WED }, MON).state;
   assert.equal(endExam(s, MON).refused, "help_off");
   assert.ok(examOn(endExam(s, MON).state));
   const soon = startExam(setHelp(setUp({}), true), { until: MON + 3 * 3600e3 }, MON).state;
-  assert.equal(endExam(soon, MON).refused, "ends_anyway");
+  assert.equal(endExam(soon, MON).needsOk, true, "Maxime, 2026-10-19: a try-out ending at 4:30 locked him in");
   assert.equal(endExam(setUp({}), MON).refused, "not_on");
   const dropped = proposeRules(s, { ...s.rules, exam: null }, MON).state;
   assert.equal(rollover(dropped, at("2026-10-20T04:00:01-04:00")).rules.exam.until, WED, "a rule change never ends exam mode");

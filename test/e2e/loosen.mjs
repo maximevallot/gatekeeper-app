@@ -81,6 +81,14 @@ try {
   s = await st();
   check("after a no, one step more is refused until tomorrow", /said no to a loosening today/.test(await p.evaluate(`document.getElementById('saved').textContent`)) && !s.loosen && s.pending.rules.kinds.video.minutes === 25, { saved: await p.evaluate(`document.getElementById('saved').textContent`), pending: s.pending });
 
+  // 3b. Maxime, 2026-10-19: exam mode started as a try-out, ending this afternoon. A yes ends it at once.
+  await p.evaluate(`chrome.runtime.sendMessage({ type: "startExam", until: Date.now() + 2 * 3600e3, goal: "demo", source: "rules" })`);
+  const asked = await p.evaluate(`chrome.runtime.sendMessage({ type: "endExam" })`);
+  await p.send("Page.reload"); await sleep(1200);
+  await reason("It was a try-out to show friends, I have no exam");
+  s = await st();
+  check("exam mode ending this afternoon can be asked about, and a yes ends it at once", asked.needsOk === true && !(s.rules.exam && s.rules.exam.until > Date.now()) && !s.loosen, { asked, exam: s.rules.exam, loosen: s.loosen });
+
   // 4. With the relay gone, nothing loosens (#8): ending exam mode early keeps waiting, and exam mode stays on.
   const started = await p.evaluate(`chrome.runtime.sendMessage({ type: "startExam", until: Date.now() + 2 * 86400e3, goal: "midterm", source: "rules" })`);
   await p.evaluate(`chrome.runtime.sendMessage({ type: "endExam" })`);
@@ -91,7 +99,7 @@ try {
   s = await st();
   check("with the agent out of reach, exam mode stays on and the request keeps waiting", started.ok && s.rules.exam && s.rules.exam.until > Date.now() && s.loosen && s.loosen.kind === "exam"
     && /Nothing loosens yet/.test(await p.evaluate(`document.getElementById('saved').textContent`)), { exam: s.rules.exam, loosen: s.loosen });
-  check("every request and answer is in the log", JSON.stringify(s.log.filter((e) => e.type === "loosen").map((e) => e.decision)) === JSON.stringify(["ask", "allow", "deny", "unavailable"]), s.log.filter((e) => e.type === "loosen"));
+  check("every request and answer is in the log", JSON.stringify(s.log.filter((e) => e.type === "loosen").map((e) => e.decision)) === JSON.stringify(["ask", "allow", "deny", "allow", "unavailable"]), s.log.filter((e) => e.type === "loosen"));
   check("the agent saw the change and the reason", mock.requests.some((r) => r.body.system?.includes("You hold the key") && /Video: 25 min a day → 30 min a day/.test(r.body.messages[0].content) && /I just want more/.test(r.body.messages[0].content)));
 } catch (e) {
   console.log("FAIL", e.message); failures++;

@@ -49,6 +49,7 @@ const message = /<message>\n([\s\S]*)\n<\/message>/.exec(user)?.[1] ?? "";
   if (body.system?.includes("You hold the key to loosening")) {
     // The key to loosening: a lecture is a reason, "school" gets one question, anything else is a no.
     if (/lecture/i.test(message)) return { decision: "allow", reply: "OK, from tomorrow morning." };
+    if (/try-out/i.test(message)) return { decision: "allow", when: "now", reply: "OK: exam mode ends now." };
     if (/school/i.test(message) && /earlier question: none/.test(user)) return { decision: "ask", reply: "What changed for school?" };
     return { decision: "deny", reply: "The rule stays." };
   }

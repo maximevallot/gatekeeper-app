@@ -303,12 +303,10 @@ $("exam-start").addEventListener("click", () => {
   $("exam-until").focus();
 });
 
-// Ending early asks the agent (decision of 2026-10-17): a yes ends it at once if the exam is over, else the
-// next morning. With Claude help off it runs to its set end.
+// Ending early asks the agent, and a yes ends it at once (2026-10-19). With AI help off it runs to its set end.
 $("exam-end-open").addEventListener("click", async () => {
   const r = await ask("endExam").catch(() => ({ refused: "unreachable" }));
   const note = {
-    ends_anyway: `It ends ${when(r.until)} anyway, before the next morning. Nothing to ask.`,
     help_off: `With AI help off, exam mode runs to its end, ${when(r.until)}.`,
     asked_today: "Gatekeeper said no to that today. Ask again tomorrow.",
     not_on: "Exam mode is already off.",

@@ -17,17 +17,15 @@ const setUp = (kinds, help = true) => {
 // A worker ticking: wall time `now`, monotonic `mono`, in one run of the worker.
 const tickAt = (s, url, now, mono, run = "run1") => tick(s, { url, focused: true, active: true, seconds: 2, now, mono, run }).state;
 
-test("#1 (gate N1, Critical): a Quiz added to the calendar during exam mode doesn't end a midterm's exam mode at once", () => {
+test("#1 (gate N1, Critical): a Quiz added to the calendar during exam mode isn't taken as the midterm's own time", () => {
   const MIDTERM = SAT + 40 * 3600e3;
   let s = startExam(setUp({ video: 0 }), { until: MIDTERM, goal: "Midterm 15.425", at: MIDTERM, source: "calendar" }, SAT).state;
   assert.equal(s.rules.exam.at, MIDTERM, "the exam's own time is fixed when exam mode starts");
   s = { ...s, calendar: { url: "https://cal.example/feed.ics", events: [{ title: "Quiz", start: SAT + 30 * 60e3 }, { title: "Midterm 15.425", start: MIDTERM }], fetchedAt: SAT, error: null } };
   const now = SAT + 31 * 60e3;
   assert.equal(examAt(rollover(s, now)), null, "the quiz isn't the exam");
-  const e = endExam(s, now);
-  const r = applyLoosenAnswer(e.state, { answer: { decision: "allow", when: "now", reply: "OK: exam mode ends now." }, message: "exam is over", now });
-  assert.ok(examOn(r.state), "a yes with \"now\" still waits for the morning");
-  assert.equal(r.result.now, false);
+  // Since 2026-10-19 the agent's yes ends exam mode at once, so what the student says is judged by the agent;
+  // the calendar still never tells it the exam has begun.
   // A later start keeps the exam's own time where it was: it never moves earlier.
   s = startExam(s, { until: MIDTERM + 3600e3, at: SAT + 60e3 }, now).state;
   assert.equal(s.rules.exam.at, MIDTERM);
@@ -139,11 +137,11 @@ test("#4 (chat N1): after a no, the chat tells the relay loosening is locked, an
   assert.ok(!after.thread.turns.some((x) => x.text === "That changes nothing in your rules."));
 });
 
-test("#3 (chat N2): Apply on \"end exam mode\" says what can happen without a calendar", () => {
+test("#3 (chat N2): Apply on \"end exam mode\" says a yes ends it now", () => {
   let s = startExam(setUp({ video: 0 }), { until: SAT + 3 * 86400e3, goal: "x" }, SAT).state;
   s = { ...s, thread: { turns: [], card: { answer: { reply: "I can ask for that.", diff: [{ op: "examEnd" }] }, view: { now: [], later: [] } } } };
   const r = applyCard(s, SAT);
-  assert.match(r.state.thread.turns.at(-1).text, /tomorrow morning at the earliest/);
+  assert.match(r.state.thread.turns.at(-1).text, /If I say yes, it ends now/);
 });
 
 test("#3: exam mode started from the chat keeps the exam's own time the relay sends, so it can end once the exam is over", () => {

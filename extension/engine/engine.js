@@ -1409,14 +1409,13 @@ export function startExam(state, { until, goal, source = "extension", at }, now)
 
 /** End exam mode now, but only with the sentence, word for word. */
 /**
- * Ask to end exam mode early (decision of 2026-10-17, "agent decides, now if done"). It is a loosening: the
- * agent decides from the reason. A yes ends it at once if the exam is over, else the next morning. With
- * Claude help off it runs to its set end. If it ends before the next morning anyway, nothing is asked.
+ * Ask to end exam mode early. It is a loosening: the agent decides from the reason, and a yes ends it at once
+ * (2026-10-19; before, a yes waited for the morning unless the exam was over). With AI help off it runs to its
+ * set end.
  */
 export function endExam(state, now) {
   const s = rollover(state, typeof now === "object" ? now.now : now);
   if (!examOn(s)) return { state: s, refused: "not_on" };
-  if (s.rules.exam.until <= s.usage.endsAt) return { state: s, refused: "ends_anyway", until: s.rules.exam.until };
   if (!consented(s, "talk")) return { state: s, refused: "help_off", until: s.rules.exam.until };
   const key = "exam:" + s.rules.exam.until;
   if (((s.denied || {})[key] || 0) > s.clock.floor || ((s.denied || {}).exam || 0) > s.clock.floor) return { state: s, refused: "asked_today" };
@@ -1435,7 +1434,7 @@ export function examAt(state) {
   return at <= strictNow(state) ? at : null;
 }
 
-/** Exam mode ends at `at` (now, or the next morning), in the rules in force and in what waits. */
+/** Exam mode ends at `at`, in the rules in force and in what waits. */
 function examEnd(s, at) {
   const cut = (r) => (r && r.exam ? { ...r, exam: at <= s.clock.floor ? null : { ...r.exam, until: Math.min(r.exam.until, at) } } : r);
   return { ...s, rules: cut(s.rules), pending: s.pending ? { ...s.pending, rules: cut(s.pending.rules) } : null };
@@ -1515,18 +1514,16 @@ export function applyLoosenAnswer(state, { answer, message = "", now }) {
   }
   if (answer.decision === "allow") {
     const morning = s.usage.endsAt;
-    // For exam mode: at once if the agent says the exam is over (when: "now"), else the next morning. A relay
-    // without the field (when missing) means the morning.
-    // "Now" is a rule, not a judgement (QA round 2, C3): only once the exam on the calendar has begun.
-    const said = answer.when === "now" || answer.examDone === true;
-    const at = l.kind === "exam" && said && examAt(s) ? s.clock.floor : morning;
+    // Ending exam mode early: a yes ends it at once (Maxime, 2026-10-19: a try-out locked him in for hours, and
+    // exam mode is chosen for a set time, unlike a daily budget). Every other loosening waits for the morning.
+    const at = l.kind === "exam" ? s.clock.floor : morning;
     // A study site asked for during exam mode opens at once on a yes: it is needed now, and only for studying.
     const studyNow = l.kind === "rules" && examOn(s) && (l.targets || []).length && l.targets.every((tg) => tg.startsWith("study:")) && s.pending;
     s = l.kind === "exam" ? examEnd(s, at)
       : studyNow ? { ...s, rules: { ...s.rules, study: [...new Set([...(s.rules.study || []), ...l.targets.map((tg) => tg.slice(6))])] }, pending: null }
       : { ...s, pending: s.pending ? { ...s.pending, ok: true, approved: null, from: Math.max(s.pending.from, morning) } : null };
     s = { ...withoutLoosen(s, l.kind), log: log("allow") };
-    if (l.kind === "exam") s = { ...s, log: logEvent(s, "exam.end", { how: at === s.clock.floor ? "agent, at once" : "agent, next morning", at: at }) };
+    if (l.kind === "exam") s = { ...s, log: logEvent(s, "exam.end", { how: "agent, at once", at }) };
     return { state: s, result: { decision: "allow", reply: answer.reply, from: at, now: at === s.clock.floor } };
   }
   // No (or a second question): the rule stays, and the same request waits until tomorrow.
@@ -1637,8 +1634,8 @@ export function applyCard(state, now) {
   if (p.examEnd) {
     exam = endExam(s, now);
     s = exam.state;
-    text = exam.needsOk ? "To end exam mode early, tell me why. Once your exam's time has come, it can end now; before that, tomorrow morning at the earliest."
-      : { ends_anyway: `Exam mode ends at ${hhmm(exam.until)} anyway.`, help_off: `With AI help off, exam mode runs to its end at ${hhmm(exam.until)}.`,
+    text = exam.needsOk ? "To end exam mode early, tell me why. If I say yes, it ends now."
+      : { help_off: `With AI help off, exam mode runs to its end at ${hhmm(exam.until)}.`,
           asked_today: "I said no to ending it today. You can ask again tomorrow.", not_on: "Exam mode is already off." }[exam.refused] || "Nothing changed.";
   } else if (r.refused === "asked_today") text = `I said no to a loosening today${r.now.length ? "; the stricter part applies now" : ""}. You can ask again tomorrow.`;
   else if (r.refused === "help_off_today") text = `AI help was turned off today, so nothing loosens until tomorrow${r.now.length ? "; the stricter part applies now" : ""}.`;

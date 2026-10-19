@@ -190,7 +190,7 @@ export function examForm(done, source = "extension") {
   const goal = el("input", { class: "field", id: "exam-for", maxlength: "200", placeholder: "For: 15.425 midterm", autocomplete: "off", "aria-label": "What it's for" });
   const go = el("button", { class: "btn", type: "submit", id: "exam-go" }, "Start");
   const form = el("form", { class: "section", id: "exam-start-form", style: "gap: 8px" },
-    el("div", { class: "small muted" }, "Everything but study sites closes until then. Ending it early asks Gatekeeper."),
+    el("div", { class: "small muted" }, "Everything but study sites closes until then. To end it early, tell Gatekeeper why: a yes ends it at once."),
     el("div", { class: "small muted", id: "exam-access-line" }, EVERY_SITE_LINE),
     until, goal, go);
   form.addEventListener("submit", async (e) => {
